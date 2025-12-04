@@ -2,7 +2,7 @@
 
 **A CLI tool that provides AI coding agents with persistent, retrievable project context.**
 
-ContextPalace solves the problem of agents forgetting critical project knowledge during long sessions by providing small, focused memory files triggered by specific action types.
+ContextPalace solves the problem of agents forgetting critical project knowledge during long sessions by providing small, focused memory files (memos) triggered by specific task types.
 
 ## The Problem 🤔
 
@@ -17,10 +17,10 @@ The root cause: context windows are finite, early context gets compacted, and ag
 
 ## The Solution ✨
 
-Small, focused memory files (called "actions") that agents retrieve before specific task types.
+Small, focused memory files (called "memos") that agents retrieve before specific task types.
 
 ```bash
-cxp action ci-cd
+cxp memo ci-cd
 ```
 
 Returns 10-15 lines of CI/CD knowledge. The agent reads this before any CI/CD work, preventing mistakes.
@@ -45,46 +45,46 @@ cxp init
 
 This creates the `.cxp/` directory structure with:
 - 📄 `config.yaml` - Configuration file
-- 📁 `actions/` - Directory for action files
+- 📁 `memos/` - Directory for memo files
 - 📊 `logs/` - Access and write logs
 
-### Create Your First Action ✏️
+### Create Your First Memo ✏️
 
 ```bash
-# Create an action
+# Create a memo
 cxp create build
 
-# Edit the action file
-# .cxp/actions/build.yaml
+# Edit the memo file
+# .cxp/memos/build.yaml
 
 # Add a trigger to CLAUDE.md
 cxp add-trigger build "Build, test, or run commands"
 ```
 
-### Use Actions 👀
+### Use Memos 👀
 
 ```bash
-# View an action
-cxp action build
+# View a memo
+cxp memo build
 
 # View with all children
-cxp action ci-cd --depth all
+cxp memo ci-cd --depth all
 
-# List all actions
-cxp actions
+# List all memos
+cxp memos
 
 # View as JSON (for agents)
-cxp action build --json
+cxp memo build --json
 ```
 
 ## Core Concepts 💡
 
-### Actions 📋
+### Memos 📋
 
-An action is a YAML file containing focused project knowledge for a specific task type.
+A memo is a YAML file containing focused project knowledge for a specific task type.
 
 ```yaml
-# .cxp/actions/build.yaml
+# .cxp/memos/build.yaml
 
 commands:
   build: "make build"
@@ -100,9 +100,9 @@ footguns:
   - "'go run main.go' won't include build flags"
 ```
 
-### Nested Actions 🌳
+### Nested Memos 🌳
 
-Actions can have children for progressive disclosure:
+Memos can have children for progressive disclosure:
 
 ```
 ci-cd              → Overview (10 lines)
@@ -115,10 +115,10 @@ The agent loads the parent first. If more detail is needed, it loads the specifi
 
 ### Source Links 🔗
 
-Actions can link to source documents for deeper context:
+Memos can link to source documents for deeper context:
 
 ```yaml
-# .cxp/actions/ci-cd.yaml
+# .cxp/memos/ci-cd.yaml
 
 source_doc: docs/platform/ci-cd.md
 
@@ -130,16 +130,16 @@ If the summary isn't sufficient, the agent reads the full source doc.
 
 ### Triggers ⚡
 
-CLAUDE.md maps task types to action commands:
+CLAUDE.md maps task types to memo commands:
 
 ```markdown
-## Context Management
+## Context Memos
 
-| Action | Command |
-|--------|---------|
-| CI/CD changes | `cxp action ci-cd` |
-| Build/test/deploy | `cxp action build` |
-| Package versions | `cxp action package-versions` |
+| When | Command |
+|------|---------|
+| CI/CD changes | `cxp memo ci-cd` |
+| Build/test/deploy | `cxp memo build` |
+| Package versions | `cxp memo package-versions` |
 ```
 
 The agent reads this at session start and knows to run commands before specific tasks.
@@ -149,9 +149,10 @@ The agent reads this at session start and knows to run commands before specific 
 ### Core Commands
 
 - `cxp init` - 🎯 Initialize `.cxp` directory
-- `cxp action <name>` - 👀 Show action content
-- `cxp actions` - 📋 List all actions (tree view)
-- `cxp create <n>` - ✏️ Create action file (template)
+- `cxp memo <name>` - 👀 Show memo content
+- `cxp memos` - 📋 List all memos (tree view)
+- `cxp create <n>` - ✏️ Create memo file (template)
+- `cxp ingest` - 💡 Create memo from mistake (guided flow)
 - `cxp add-trigger <n> <desc>` - ⚡ Add trigger to CLAUDE.md
 - `cxp lint` - ✅ Validate structure and links
 - `cxp log` - 📊 Show recent access log
@@ -160,8 +161,8 @@ The agent reads this at session start and knows to run commands before specific 
 
 Most commands support:
 - `--json` - 📦 Output as JSON for programmatic consumption
-- `--depth all` - 🌳 Include all children (for `cxp action`)
-- `--parent <p>` - 👨‍👩‍👧 Create child action (for `cxp create`)
+- `--depth all` - 🌳 Include all children (for `cxp memo`)
+- `--parent <p>` - 👨‍👩‍👧 Create child memo (for `cxp create`)
 - `--edit` - ✏️ Open in $EDITOR after creation
 
 See the [PRD](docs/prd/contextpalace-prd.md) for complete command documentation.
@@ -171,14 +172,14 @@ See the [PRD](docs/prd/contextpalace-prd.md) for complete command documentation.
 ```
 .cxp/
 ├── config.yaml           # CXP configuration
-├── actions/
+├── memos/
 │   ├── build.yaml
 │   ├── ci-cd.yaml
 │   ├── ci-cd.argocd.yaml
 │   └── package-versions.yaml
 └── logs/
-    ├── access.jsonl      # Action reads
-    └── writes.jsonl      # Action creates/updates
+    ├── access.jsonl      # Memo reads
+    └── writes.jsonl      # Memo creates/updates
 ```
 
 ## Example Workflow 🔄
@@ -195,7 +196,7 @@ Agent: "Container is stale. Want me to trigger a build, or is there CI?"
 
 ```bash
 $ cxp create ci-cd
-Created .cxp/actions/ci-cd.yaml
+Created .cxp/memos/ci-cd.yaml
 
 # Agent writes summary to ci-cd.yaml
 
@@ -206,7 +207,7 @@ Added trigger to CLAUDE.md
 ### Agent Uses Memory ✅
 
 ```bash
-$ cxp action ci-cd
+$ cxp memo ci-cd
 
 # Agent sees: "Deploy branch does NOT trigger builds. Push to main first."
 
@@ -223,7 +224,7 @@ claude_md: "CLAUDE.md"
 
 # Size warning thresholds
 limits:
-  action_lines: 30          # Warn if action exceeds this
+  memo_lines: 30            # Warn if memo exceeds this
   trigger_rows: 20          # Warn if CLAUDE.md table exceeds this
 
 # Logging
