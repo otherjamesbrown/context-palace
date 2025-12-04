@@ -25,6 +25,13 @@ cxp memo ci-cd
 
 Returns 10-15 lines of CI/CD knowledge. The agent reads this before any CI/CD work, preventing mistakes.
 
+## Usage Philosophy 🧠
+
+ContextPalace is designed with a **"Smart Agent, Dumb Tool"** philosophy:
+
+*   **For Agents**: The CLI is a deterministic I/O tool. Agents use it programmatically (via JSON output and flags) to "save" their lessons learned. The Agent provides the intelligence; the CLI provides the structure.
+*   **For Humans**: The CLI provides interactive wizards (like `cxp ingest`) to guide humans through creating structured context without needing to remember complex flags.
+
 ## Quick Start 🚀
 
 ### Installation 📦

@@ -10,6 +10,17 @@ Add this command to v1.0 alongside the other commands.
 
 The trigger added to CLAUDE.md ensures the agent consults this memo before similar tasks in future sessions.
 
+### Design Philosophy: "Dumb CLI, Smart Agent"
+
+The `cxp ingest` command is designed to be **deterministic and "dumb"**. It does not use LLMs or external services to "guess" what went wrong.
+
+*   **The Agent is the Brain**: The AI Agent (or Human) possesses the context, intent, and reasoning to understand the error. It provides the intelligence.
+*   **The CLI is the Hand**: The `cxp` tool provides the reliable, structured mechanism to persist that intelligence.
+
+**Usage Patterns:**
+1.  **Agents (Flag Mode)**: Agents should use the CLI non-interactively with flags (`--what`, `--cause`, etc.). This allows the Agent to synthesize the lesson using its full context window and "save" it deterministically.
+2.  **Humans (Interactive Mode)**: Humans should use the interactive wizard. It guides them through the structured thought process without needing to remember flags.
+
 ### Command
 
 ```bash
