@@ -1,4 +1,4 @@
-# ContextPalace (cxp) 🏰
+# Context-Palace (cxp) 🏰
 
 **A CLI tool that provides AI coding agents with persistent, retrievable project context.**
 
