@@ -7,13 +7,13 @@ type LintResult struct {
 }
 
 type LintError struct {
-	Action   string `json:"action"`
+	Memo     string `json:"memo"`
 	Field    string `json:"field,omitempty"`
 	Error    string `json:"error"`
 	Severity string `json:"severity"`
 }
 
 type LintWarning struct {
-	Action  string `json:"action"`
+	Memo    string `json:"memo"`
 	Warning string `json:"warning"`
 }

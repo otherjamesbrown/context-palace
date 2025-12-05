@@ -7,7 +7,7 @@ type Config struct {
 }
 
 type LimitsConfig struct {
-	ActionLines int `yaml:"action_lines"`
+	MemoLines   int `yaml:"memo_lines"`
 	TriggerRows int `yaml:"trigger_rows"`
 }
 
@@ -21,7 +21,7 @@ func DefaultConfig() Config {
 	return Config{
 		ClaudeMD: "CLAUDE.md",
 		Limits: LimitsConfig{
-			ActionLines: 30,
+			MemoLines:   30,
 			TriggerRows: 20,
 		},
 		Logging: LogConfig{

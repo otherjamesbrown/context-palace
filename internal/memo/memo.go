@@ -1,8 +1,6 @@
-package action
+package memo
 
-import "time"
-
-type Action struct {
+type Memo struct {
 	Name      string                 `yaml:"-" json:"name"`
 	Path      string                 `yaml:"-" json:"path"`
 	Parent    string                 `yaml:"parent,omitempty" json:"parent"`
@@ -11,7 +9,7 @@ type Action struct {
 	Content   map[string]interface{} `yaml:",inline" json:"content"`
 }
 
-type ActionMeta struct {
+type MemoMeta struct {
 	Name     string   `json:"name"`
 	Parent   *string  `json:"parent"`
 	Children []string `json:"children"`
