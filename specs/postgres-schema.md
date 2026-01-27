@@ -109,6 +109,75 @@ CREATE TRIGGER shards_updated_at
   EXECUTE FUNCTION update_updated_at();
 ```
 
+## Helper Functions
+
+Simplify common queries - agents can use these instead of writing complex SQL.
+
+```sql
+-- Get unread messages for an agent
+CREATE OR REPLACE FUNCTION unread_for(p_project TEXT, p_agent TEXT)
+RETURNS TABLE (id TEXT, title TEXT, creator TEXT, kind TEXT, created_at TIMESTAMPTZ) AS $$
+  SELECT
+    s.id, s.title, s.creator,
+    (SELECT label FROM labels WHERE shard_id = s.id AND label LIKE 'kind:%' LIMIT 1),
+    s.created_at
+  FROM shards s
+  JOIN labels l ON l.shard_id = s.id
+  WHERE s.project = p_project
+    AND s.type = 'message'
+    AND l.label = 'to:' || p_agent
+    AND s.id NOT IN (SELECT shard_id FROM read_receipts WHERE agent_id = p_agent)
+  ORDER BY s.created_at;
+$$ LANGUAGE sql;
+
+-- Get tasks assigned to an agent
+CREATE OR REPLACE FUNCTION tasks_for(p_project TEXT, p_agent TEXT)
+RETURNS TABLE (id TEXT, title TEXT, priority INT, status TEXT, created_at TIMESTAMPTZ) AS $$
+  SELECT id, title, priority, status, created_at
+  FROM shards
+  WHERE project = p_project AND type = 'task' AND owner = p_agent AND status != 'closed'
+  ORDER BY priority, created_at;
+$$ LANGUAGE sql;
+
+-- Get ready tasks (open, not blocked)
+CREATE OR REPLACE FUNCTION ready_tasks(p_project TEXT)
+RETURNS TABLE (id TEXT, title TEXT, priority INT, owner TEXT, created_at TIMESTAMPTZ) AS $$
+  SELECT s.id, s.title, s.priority, s.owner, s.created_at
+  FROM shards s
+  WHERE s.project = p_project AND s.type = 'task' AND s.status = 'open'
+    AND NOT EXISTS (
+      SELECT 1 FROM edges e JOIN shards blocker ON e.to_id = blocker.id
+      WHERE e.from_id = s.id AND e.edge_type = 'blocks' AND blocker.status != 'closed'
+    )
+  ORDER BY s.priority, s.created_at;
+$$ LANGUAGE sql;
+
+-- Get conversation thread from root message
+CREATE OR REPLACE FUNCTION get_thread(p_root_id TEXT)
+RETURNS TABLE (id TEXT, title TEXT, creator TEXT, content TEXT, depth INT, created_at TIMESTAMPTZ) AS $$
+  WITH RECURSIVE thread AS (
+    SELECT s.id, s.title, s.creator, s.content, 0 AS depth, s.created_at
+    FROM shards s WHERE s.id = p_root_id
+    UNION ALL
+    SELECT s.id, s.title, s.creator, s.content, t.depth + 1, s.created_at
+    FROM shards s
+    JOIN edges e ON e.from_id = s.id
+    JOIN thread t ON e.to_id = t.id
+    WHERE e.edge_type = 'replies-to'
+  )
+  SELECT * FROM thread ORDER BY depth, created_at;
+$$ LANGUAGE sql;
+```
+
+### Usage
+
+```sql
+SELECT * FROM unread_for('penfold', 'agent-backend');
+SELECT * FROM tasks_for('penfold', 'agent-backend');
+SELECT * FROM ready_tasks('penfold');
+SELECT * FROM get_thread('cp-abc123');
+```
+
 ## Common Queries
 
 ### Create a task

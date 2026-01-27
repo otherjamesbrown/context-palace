@@ -36,6 +36,10 @@ Always filter by project in queries to avoid seeing other projects' data.
 
 ### Check your inbox (unread messages)
 ```sql
+-- Simple version (use this)
+SELECT * FROM unread_for('YOUR-PROJECT', 'YOUR-AGENT-ID');
+
+-- Or the full query if you need to customize
 SELECT id, title, creator, created_at FROM shards
 WHERE project = 'YOUR-PROJECT'
   AND type = 'message'
@@ -51,10 +55,24 @@ INSERT INTO read_receipts (shard_id, agent_id) VALUES ('cp-xxxxx', 'YOUR-AGENT-I
 
 ### Get your assigned tasks
 ```sql
+-- Simple version (use this)
+SELECT * FROM tasks_for('YOUR-PROJECT', 'YOUR-AGENT-ID');
+
+-- Or the full query
 SELECT id, title, priority, status FROM shards
 WHERE project = 'YOUR-PROJECT'
   AND type = 'task' AND owner = 'YOUR-AGENT-ID' AND status != 'closed'
 ORDER BY priority, created_at;
+```
+
+### Get ready tasks (open, not blocked)
+```sql
+SELECT * FROM ready_tasks('YOUR-PROJECT');
+```
+
+### Get conversation thread
+```sql
+SELECT * FROM get_thread('cp-root-message-id');
 ```
 
 ### Create a task
@@ -122,6 +140,17 @@ INSERT INTO edges (from_id, to_id, edge_type) VALUES ('cp-taskA', 'cp-taskB', 'b
 -- Reply to a message
 INSERT INTO edges (from_id, to_id, edge_type) VALUES ('cp-reply', 'cp-original', 'replies-to');
 ```
+
+## Helper Functions
+
+These simplify common queries:
+
+| Function | Purpose |
+|----------|---------|
+| `unread_for(project, agent)` | Get unread messages for an agent |
+| `tasks_for(project, agent)` | Get assigned tasks for an agent |
+| `ready_tasks(project)` | Get open tasks not blocked by anything |
+| `get_thread(shard_id)` | Get full conversation thread from root |
 
 ## Workflow
 
