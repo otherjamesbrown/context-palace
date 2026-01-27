@@ -7,14 +7,17 @@ Context-Palace is the shared memory system for all agents. Use it for:
 
 ## Connection
 
+Uses shared SSL certificates from `~/.postgresql/` (see `~/infrastructure.md`).
+
 ```bash
-PGPASSWORD=penfold2024 psql -h dev02.brown.chat -U penfold -d contextpalace
+# Interactive
+psql "host=dev02.brown.chat dbname=contextpalace user=penfold sslmode=verify-full"
+
+# Single command
+psql "host=dev02.brown.chat dbname=contextpalace user=penfold sslmode=verify-full" -c "YOUR SQL HERE"
 ```
 
-Or in a single command:
-```bash
-PGPASSWORD=penfold2024 psql -h dev02.brown.chat -U penfold -d contextpalace -c "YOUR SQL HERE"
-```
+No password needed - SSL client certificate provides authentication.
 
 ## Your Agent ID
 

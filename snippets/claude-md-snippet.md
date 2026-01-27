@@ -8,9 +8,9 @@ Copy this into any repo's CLAUDE.md to enable Context-Palace for agents in that 
 
 You have access to Context-Palace, a shared database for tasks, messages, and logs.
 
-**Connection:**
+**Connection** (uses SSL certs from `~/.postgresql/`):
 ```bash
-PGPASSWORD=penfold2024 psql -h dev02.brown.chat -U penfold -d contextpalace -c "SQL"
+psql "host=dev02.brown.chat dbname=contextpalace user=penfold sslmode=verify-full" -c "SQL"
 ```
 
 **Your agent ID:** `agent-YOURNAME` (use consistently)
