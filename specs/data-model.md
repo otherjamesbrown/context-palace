@@ -11,6 +11,7 @@ A **shard** is the universal primitive in Context-Palace. Everything is a shard:
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | string | Hash-based unique ID (e.g., `cp-a1b2c3`) |
+| `project` | string | Project namespace (e.g., `penfold`, `context-palace`) |
 | `title` | string | Short summary (required, max 500 chars) |
 | `content` | text | The main payload - markdown, JSON, whatever |
 | `status` | enum | `open`, `in_progress`, `closed` |

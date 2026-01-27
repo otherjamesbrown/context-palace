@@ -17,6 +17,7 @@ The core table. Everything is a shard.
 ```sql
 CREATE TABLE shards (
   id          TEXT PRIMARY KEY DEFAULT gen_shard_id(),
+  project     TEXT NOT NULL,                 -- Project namespace: 'penfold', 'context-palace', etc.
   title       TEXT NOT NULL CHECK (char_length(title) <= 500),
   content     TEXT,
   type        TEXT,                          -- 'task', 'message', 'log', 'config', 'doc', etc.
@@ -32,6 +33,9 @@ CREATE TABLE shards (
 );
 
 -- Indexes
+CREATE INDEX idx_shards_project ON shards(project);
+CREATE INDEX idx_shards_project_status ON shards(project, status);
+CREATE INDEX idx_shards_project_type ON shards(project, type);
 CREATE INDEX idx_shards_status ON shards(status);
 CREATE INDEX idx_shards_type ON shards(type);
 CREATE INDEX idx_shards_creator ON shards(creator);
@@ -245,6 +249,7 @@ $$ LANGUAGE plpgsql;
 -- Tables
 CREATE TABLE shards (
   id          TEXT PRIMARY KEY DEFAULT gen_shard_id(),
+  project     TEXT NOT NULL,
   title       TEXT NOT NULL CHECK (char_length(title) <= 500),
   content     TEXT,
   type        TEXT,
@@ -282,6 +287,9 @@ CREATE TABLE read_receipts (
 );
 
 -- Indexes
+CREATE INDEX idx_shards_project ON shards(project);
+CREATE INDEX idx_shards_project_status ON shards(project, status);
+CREATE INDEX idx_shards_project_type ON shards(project, type);
 CREATE INDEX idx_shards_status ON shards(status);
 CREATE INDEX idx_shards_type ON shards(type);
 CREATE INDEX idx_shards_creator ON shards(creator);

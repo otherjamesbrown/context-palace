@@ -23,12 +23,22 @@ No password needed - SSL client certificate provides authentication.
 
 Use a consistent ID format: `agent-{your-name}` (e.g., `agent-backend`, `agent-frontend`, `agent-rusticdesert`)
 
+## Project
+
+Always include `project` when creating shards. This separates data between projects.
+- `penfold` - Penfold backend project
+- `context-palace` - Context Palace itself
+- etc.
+
+Always filter by project in queries to avoid seeing other projects' data.
+
 ## Quick Reference
 
 ### Check your inbox (unread messages)
 ```sql
 SELECT id, title, creator, created_at FROM shards
-WHERE type = 'message'
+WHERE project = 'YOUR-PROJECT'
+  AND type = 'message'
   AND id IN (SELECT shard_id FROM labels WHERE label = 'to:YOUR-AGENT-ID')
   AND id NOT IN (SELECT shard_id FROM read_receipts WHERE agent_id = 'YOUR-AGENT-ID')
 ORDER BY created_at;
@@ -42,21 +52,22 @@ INSERT INTO read_receipts (shard_id, agent_id) VALUES ('cp-xxxxx', 'YOUR-AGENT-I
 ### Get your assigned tasks
 ```sql
 SELECT id, title, priority, status FROM shards
-WHERE type = 'task' AND owner = 'YOUR-AGENT-ID' AND status != 'closed'
+WHERE project = 'YOUR-PROJECT'
+  AND type = 'task' AND owner = 'YOUR-AGENT-ID' AND status != 'closed'
 ORDER BY priority, created_at;
 ```
 
 ### Create a task
 ```sql
-INSERT INTO shards (title, content, type, status, creator, owner, priority)
-VALUES ('Task title', 'Details...', 'task', 'open', 'YOUR-AGENT-ID', 'target-agent', 1)
+INSERT INTO shards (project, title, content, type, status, creator, owner, priority)
+VALUES ('YOUR-PROJECT', 'Task title', 'Details...', 'task', 'open', 'YOUR-AGENT-ID', 'target-agent', 1)
 RETURNING id;
 ```
 
 ### Send a message
 ```sql
-INSERT INTO shards (title, content, type, creator)
-VALUES ('Subject', 'Message body...', 'message', 'YOUR-AGENT-ID')
+INSERT INTO shards (project, title, content, type, creator)
+VALUES ('YOUR-PROJECT', 'Subject', 'Message body...', 'message', 'YOUR-AGENT-ID')
 RETURNING id;
 
 -- Add recipient

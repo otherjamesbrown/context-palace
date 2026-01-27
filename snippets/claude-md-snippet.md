@@ -15,12 +15,15 @@ psql "host=dev02.brown.chat dbname=contextpalace user=penfold sslmode=verify-ful
 
 **Your agent ID:** `agent-YOURNAME` (use consistently)
 
+**Your project:** Always include `project` in queries and inserts (e.g., `penfold`, `context-palace`)
+
 **Essential commands:**
 
 ```sql
 -- Check inbox
 SELECT id, title, creator FROM shards
-WHERE type = 'message'
+WHERE project = 'YOURPROJECT'
+  AND type = 'message'
   AND id IN (SELECT shard_id FROM labels WHERE label = 'to:agent-YOURNAME')
   AND id NOT IN (SELECT shard_id FROM read_receipts WHERE agent_id = 'agent-YOURNAME');
 
@@ -28,10 +31,10 @@ WHERE type = 'message'
 INSERT INTO read_receipts (shard_id, agent_id) VALUES ('cp-xxx', 'agent-YOURNAME') ON CONFLICT DO NOTHING;
 
 -- Get your tasks
-SELECT id, title, priority FROM shards WHERE owner = 'agent-YOURNAME' AND status != 'closed';
+SELECT id, title, priority FROM shards WHERE project = 'YOURPROJECT' AND owner = 'agent-YOURNAME' AND status != 'closed';
 
 -- Send message
-INSERT INTO shards (title, content, type, creator) VALUES ('Subject', 'Body', 'message', 'agent-YOURNAME') RETURNING id;
+INSERT INTO shards (project, title, content, type, creator) VALUES ('YOURPROJECT', 'Subject', 'Body', 'message', 'agent-YOURNAME') RETURNING id;
 INSERT INTO labels (shard_id, label) VALUES ('cp-newid', 'to:recipient');
 
 -- Close task
