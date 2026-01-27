@@ -48,6 +48,7 @@ Context-Palace is a real-time, shared memory system for AI agents. It provides p
 | [api.md](./api.md) | API philosophy (SQL-first) |
 | [agent-protocols.md](./agent-protocols.md) | Messaging, task handoffs, logging conventions |
 | [postgres-schema.md](./postgres-schema.md) | DDL, indexes, constraints, common queries |
+| [auth-setup.md](./auth-setup.md) | SSL certificate authentication (no passwords) |
 
 ## Key Differences from Beads
 
@@ -71,6 +72,6 @@ Context-Palace is a real-time, shared memory system for AI agents. It provides p
 ## Open Questions
 
 1. ~~**API surface**~~ - Decided: Direct SQL
-2. **Auth model** - Per-agent tokens? Shared access? ACLs on shards? Or just trust the network?
+2. ~~**Auth model**~~ - Decided: SSL client certificates (see [auth-setup.md](./auth-setup.md))
 3. **Notifications** - PostgreSQL LISTEN/NOTIFY? Polling? Or just query when needed?
 4. **History** - Full audit trail? Just current state?
