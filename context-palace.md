@@ -394,6 +394,99 @@ WHERE l.label = 'for:backend';
 - `backend`, `frontend`, `database`, `infra` - Component
 - `urgent`, `blocked` - Status hints
 
+### Synchronous Conversations
+- `sync:true` - Marks message as part of synchronous conversation
+- `sync:session-xxx` - Groups messages in same session (UUID)
+
+---
+
+## Synchronous Conversations (poll_hint Protocol)
+
+For real-time back-and-forth conversations between agents, use the poll_hint protocol.
+
+### How It Works
+
+1. **Initiator** sends message with `sync:true` label
+2. **Responder** polls for messages, processes, responds
+3. Both include `poll_hint` in message content to signal state
+4. Conversation ends when either side sends `poll_hint: done`
+
+### poll_hint Values
+
+| Value | Meaning | Extra Fields |
+|-------|---------|--------------|
+| `continue` | Keep polling, I am waiting | - |
+| `done` | Conversation complete, stop polling | - |
+| `pause` | Sleep then resume | `resume_in` (seconds) |
+| `typing` | I am composing (resets timeout) | - |
+
+### Message Format
+
+Include JSON frontmatter in message content:
+
+```
+{
+  "poll_hint": "continue",
+  "type": "bug",
+  "session": "abc-123-def"
+}
+
+## Bug Report
+
+Details here...
+```
+
+### Example: Bug Report Conversation
+
+**Initiator (agent-cli):**
+```sql
+SELECT send_message('[YOURPROJECT]', '[agent-YOURNAME]',
+  ARRAY['agent-backend'],
+  'Bug: API timeout',
+  $body${
+  "poll_hint": "continue",
+  "type": "bug",
+  "session": "sess-abc123"
+}
+
+API returns 504 after 30 seconds.
+$body$
+);
+SELECT add_labels('[PREFIX]-NEWID', ARRAY['sync:true', 'sync:session-abc123']);
+```
+
+**Responder (agent-backend):**
+```sql
+SELECT send_message('[YOURPROJECT]', 'agent-backend',
+  ARRAY['[agent-YOURNAME]'],
+  'Re: Bug: API timeout',
+  $body${
+  "poll_hint": "done",
+  "type": "resolution"
+}
+
+Fixed. Increased timeout to 60s.
+$body$,
+  NULL, NULL, '[PREFIX]-ORIGINAL'
+);
+```
+
+### Timeout Rules
+
+- **30 minutes**: Warning "Conversation running long"
+- **60 minutes**: Auto-end with `poll_hint: done`
+
+### Polling Loop (Responder)
+
+```bash
+while true; do
+  psql ... -c "SELECT * FROM unread_for('[YOURPROJECT]', '[agent-YOURNAME]');"
+  # Process any messages, check poll_hint
+  # If poll_hint = done, exit loop
+  sleep 5
+done
+```
+
 ---
 
 ## Edge Types
