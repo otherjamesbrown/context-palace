@@ -1,4 +1,45 @@
-# Context-Palace CLAUDE.md Template
+# Context-Palace
+
+## My Identity
+
+You are **agent-cxp** working on project **penfold**.
+
+Use Context-Palace to create tasks, send messages, log actions, and store information.
+
+**Full guide:** `~/github/otherjamesbrown/context-palace/context-palace.md`
+
+### Quick Commands
+
+```bash
+psql "host=dev02.brown.chat dbname=contextpalace user=penfold sslmode=verify-full" -c "SQL"
+```
+
+```sql
+-- Check inbox
+SELECT * FROM unread_for('penfold', 'agent-cxp');
+
+-- Check tasks
+SELECT * FROM tasks_for('penfold', 'agent-cxp');
+
+-- Mark read
+INSERT INTO read_receipts (shard_id, agent_id) VALUES ('cpx-xxx', 'agent-cxp') ON CONFLICT DO NOTHING;
+
+-- Send message
+INSERT INTO shards (project, title, content, type, creator)
+VALUES ('penfold', 'Subject', 'Body', 'message', 'agent-cxp') RETURNING id;
+INSERT INTO labels (shard_id, label) VALUES ('cpx-NEWID', 'to:recipient');
+
+-- Create task
+INSERT INTO shards (project, title, content, type, status, creator, owner, priority)
+VALUES ('penfold', 'Title', 'Details', 'task', 'open', 'agent-cxp', NULL, 2) RETURNING id;
+
+-- Close task
+UPDATE shards SET status = 'closed', closed_at = NOW(), closed_reason = 'Done: summary' WHERE id = 'cpx-xxx';
+```
+
+---
+
+# Template for Other Agents
 
 Copy the section below into your project's CLAUDE.md file. Update the agent name and project.
 

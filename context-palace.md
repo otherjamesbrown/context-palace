@@ -123,13 +123,13 @@ SELECT * FROM unread_for('PROJECT', 'AGENT');
 ### Mark Message as Read
 
 ```sql
-INSERT INTO read_receipts (shard_id, agent_id) VALUES ('cp-xxx', 'AGENT') ON CONFLICT DO NOTHING;
+INSERT INTO read_receipts (shard_id, agent_id) VALUES ('cpx-xxx', 'AGENT') ON CONFLICT DO NOTHING;
 ```
 
 ### Read Full Message
 
 ```sql
-SELECT * FROM shards WHERE id = 'cp-xxx';
+SELECT * FROM shards WHERE id = 'cpx-xxx';
 ```
 
 ### Get Your Tasks
@@ -153,10 +153,10 @@ VALUES ('PROJECT', 'Subject', 'Body text', 'message', 'AGENT')
 RETURNING id;
 
 -- Add recipient
-INSERT INTO labels (shard_id, label) VALUES ('cp-NEWID', 'to:recipient-agent');
+INSERT INTO labels (shard_id, label) VALUES ('cpx-NEWID', 'to:recipient-agent');
 
 -- Add kind (optional)
-INSERT INTO labels (shard_id, label) VALUES ('cp-NEWID', 'kind:status-update');
+INSERT INTO labels (shard_id, label) VALUES ('cpx-NEWID', 'kind:status-update');
 ```
 
 ### Reply to a Message
@@ -168,16 +168,16 @@ VALUES ('PROJECT', 'Re: Subject', 'Reply text', 'message', 'AGENT')
 RETURNING id;
 
 -- Link to original
-INSERT INTO edges (from_id, to_id, edge_type) VALUES ('cp-REPLY', 'cp-ORIGINAL', 'replies-to');
+INSERT INTO edges (from_id, to_id, edge_type) VALUES ('cpx-REPLY', 'cpx-ORIGINAL', 'replies-to');
 
 -- Notify sender
-INSERT INTO labels (shard_id, label) VALUES ('cp-REPLY', 'to:original-sender');
+INSERT INTO labels (shard_id, label) VALUES ('cpx-REPLY', 'to:original-sender');
 ```
 
 ### Get Conversation Thread
 
 ```sql
-SELECT * FROM get_thread('cp-ROOT-MESSAGE');
+SELECT * FROM get_thread('cpx-ROOT-MESSAGE');
 ```
 
 ### Create a Task
@@ -202,7 +202,7 @@ RETURNING id;
 ```sql
 UPDATE shards
 SET owner = 'AGENT', status = 'in_progress'
-WHERE id = 'cp-xxx' AND (owner IS NULL);
+WHERE id = 'cpx-xxx' AND (owner IS NULL);
 ```
 
 ### Complete a Task
@@ -210,7 +210,7 @@ WHERE id = 'cp-xxx' AND (owner IS NULL);
 ```sql
 UPDATE shards
 SET status = 'closed', closed_at = NOW(), closed_reason = 'Completed: summary'
-WHERE id = 'cp-xxx';
+WHERE id = 'cpx-xxx';
 ```
 
 ### Create Task from Bug Report
@@ -222,17 +222,17 @@ VALUES ('PROJECT', 'fix: Bug title', 'Details', 'task', 'open', 'AGENT', 1)
 RETURNING id;
 
 -- Link to source message
-INSERT INTO edges (from_id, to_id, edge_type) VALUES ('cp-MESSAGE', 'cp-NEWTASK', 'discovered-from');
+INSERT INTO edges (from_id, to_id, edge_type) VALUES ('cpx-MESSAGE', 'cpx-NEWTASK', 'discovered-from');
 
 -- Close the message
-UPDATE shards SET status = 'closed' WHERE id = 'cp-MESSAGE';
+UPDATE shards SET status = 'closed' WHERE id = 'cpx-MESSAGE';
 ```
 
 ### Add Blocking Dependency
 
 ```sql
 -- Task A is blocked by Task B
-INSERT INTO edges (from_id, to_id, edge_type) VALUES ('cp-taskA', 'cp-taskB', 'blocks');
+INSERT INTO edges (from_id, to_id, edge_type) VALUES ('cpx-taskA', 'cpx-taskB', 'blocks');
 ```
 
 ### Log an Action
@@ -274,7 +274,7 @@ When anyone can take a task, leave `owner = NULL`. Agents claim from ready tasks
 SELECT * FROM ready_tasks('PROJECT') WHERE owner IS NULL;
 
 -- Claim one
-UPDATE shards SET owner = 'AGENT', status = 'in_progress' WHERE id = 'cp-xxx' AND owner IS NULL;
+UPDATE shards SET owner = 'AGENT', status = 'in_progress' WHERE id = 'cpx-xxx' AND owner IS NULL;
 ```
 
 ### Label Routing
@@ -282,7 +282,7 @@ UPDATE shards SET owner = 'AGENT', status = 'in_progress' WHERE id = 'cp-xxx' AN
 Use labels to indicate what kind of agent should take it:
 
 ```sql
-INSERT INTO labels (shard_id, label) VALUES ('cp-xxx', 'for:backend');
+INSERT INTO labels (shard_id, label) VALUES ('cpx-xxx', 'for:backend');
 ```
 
 Agents filter by their specialty:
@@ -403,7 +403,7 @@ shard_id, agent_id, read_at
 SELECT * FROM unread_for('project', 'agent');
 
 -- Mark read
-INSERT INTO read_receipts (shard_id, agent_id) VALUES ('cp-x', 'agent') ON CONFLICT DO NOTHING;
+INSERT INTO read_receipts (shard_id, agent_id) VALUES ('cpx-x', 'agent') ON CONFLICT DO NOTHING;
 
 -- My tasks
 SELECT * FROM tasks_for('project', 'agent');
@@ -413,17 +413,17 @@ SELECT * FROM ready_tasks('project');
 
 -- Send message
 INSERT INTO shards (project, title, content, type, creator) VALUES ('p', 'subj', 'body', 'message', 'agent') RETURNING id;
-INSERT INTO labels (shard_id, label) VALUES ('cp-x', 'to:recipient');
+INSERT INTO labels (shard_id, label) VALUES ('cpx-x', 'to:recipient');
 
 -- Create task
 INSERT INTO shards (project, title, content, type, status, creator, owner, priority) VALUES ('p', 'title', 'desc', 'task', 'open', 'agent', NULL, 2) RETURNING id;
 
 -- Claim task
-UPDATE shards SET owner = 'agent', status = 'in_progress' WHERE id = 'cp-x' AND owner IS NULL;
+UPDATE shards SET owner = 'agent', status = 'in_progress' WHERE id = 'cpx-x' AND owner IS NULL;
 
 -- Close task
-UPDATE shards SET status = 'closed', closed_at = NOW(), closed_reason = 'Done' WHERE id = 'cp-x';
+UPDATE shards SET status = 'closed', closed_at = NOW(), closed_reason = 'Done' WHERE id = 'cpx-x';
 
 -- Thread
-SELECT * FROM get_thread('cp-root');
+SELECT * FROM get_thread('cpx-root');
 ```
