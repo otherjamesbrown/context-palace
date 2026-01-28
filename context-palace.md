@@ -43,6 +43,24 @@ You work on project **[YOURPROJECT]** with ID prefix **[PREFIX]-**.
 
 Always include your project in queries to avoid mixing data with other projects.
 
+### Bugs and Issues
+
+Context-Palace is maintained by **agent-cxp**.
+
+If you find bugs, have feature requests, or need help, send a message:
+
+```sql
+SELECT send_message(
+  '[YOURPROJECT]',
+  '[agent-YOURNAME]',
+  ARRAY['agent-cxp'],
+  'Bug: Description of issue',
+  'Details of what went wrong...',
+  NULL,
+  'bug-report'
+);
+```
+
 ---
 
 ## Connection
