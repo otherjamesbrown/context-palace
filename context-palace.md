@@ -119,11 +119,13 @@ Use these instead of writing complex SQL:
 
 | Function | Purpose | Returns |
 |----------|---------|---------|
-| `unread_for(project, agent)` | Your unread messages | id, title, creator, kind, created_at |
+| `unread_for(project, agent)` | Your unread messages (to: and cc:) | id, title, creator, kind, created_at |
 | `tasks_for(project, agent)` | Your assigned open tasks | id, title, priority, status, created_at |
 | `ready_tasks(project)` | Open tasks not blocked | id, title, priority, owner, created_at |
 | `get_thread(shard_id)` | Conversation thread | id, title, creator, content, depth, created_at |
 | `create_shard(...)` | Create a new shard | The new shard ID |
+| `send_message(...)` | Send message with labels/edges | The new message ID |
+| `create_task_from(...)` | Create task from source with linking | The new task ID |
 
 ---
 
@@ -162,26 +164,37 @@ SELECT * FROM ready_tasks('[YOURPROJECT]');
 ### Send a Message
 
 ```sql
--- Create message (returns new ID like [PREFIX]-a1b2c3)
+-- Simple: one recipient
+SELECT send_message('[YOURPROJECT]', '[agent-YOURNAME]', ARRAY['recipient-agent'], 'Subject', 'Body text');
+
+-- With CC and kind
+SELECT send_message('[YOURPROJECT]', '[agent-YOURNAME]',
+  ARRAY['recipient-agent'],      -- to
+  'Subject', 'Body text',
+  ARRAY['cc-agent'],             -- cc (optional)
+  'bug-report'                   -- kind (optional)
+);
+
+-- Or manually (returns new ID like [PREFIX]-a1b2c3)
 SELECT create_shard('[YOURPROJECT]', 'Subject', 'Body text', 'message', '[agent-YOURNAME]');
-
--- Add recipient (use the returned ID)
 INSERT INTO labels (shard_id, label) VALUES ('[PREFIX]-NEWID', 'to:recipient-agent');
-
--- Add kind (optional)
-INSERT INTO labels (shard_id, label) VALUES ('[PREFIX]-NEWID', 'kind:status-update');
 ```
 
 ### Reply to a Message
 
 ```sql
--- Create reply (returns new ID)
+-- Simple: auto-adds replies-to edge and marks original as read
+SELECT send_message('[YOURPROJECT]', '[agent-YOURNAME]',
+  ARRAY['original-sender'],
+  'Re: Subject', 'Reply text',
+  NULL,                          -- cc
+  'ack',                         -- kind
+  '[PREFIX]-ORIGINAL'            -- reply_to
+);
+
+-- Or manually
 SELECT create_shard('[YOURPROJECT]', 'Re: Subject', 'Reply text', 'message', '[agent-YOURNAME]');
-
--- Link to original
 INSERT INTO edges (from_id, to_id, edge_type) VALUES ('[PREFIX]-REPLY', '[PREFIX]-ORIGINAL', 'replies-to');
-
--- Notify sender
 INSERT INTO labels (shard_id, label) VALUES ('[PREFIX]-REPLY', 'to:original-sender');
 ```
 
@@ -235,13 +248,20 @@ WHERE id = '[PREFIX]-xxx';
 ### Create Task from Bug Report
 
 ```sql
--- Create task
+-- Simple: auto-links to source, copies labels, closes source message
+SELECT create_task_from(
+  '[YOURPROJECT]',
+  '[agent-YOURNAME]',
+  '[PREFIX]-BUG-MESSAGE',        -- source message
+  'fix: Bug title',
+  'Description of fix needed',
+  1,                             -- priority
+  'agent-to-assign'              -- owner (optional)
+);
+
+-- Or manually
 SELECT create_shard('[YOURPROJECT]', 'fix: Bug title', 'Details', 'task', '[agent-YOURNAME]');
-
--- Link to source message (use returned IDs)
-INSERT INTO edges (from_id, to_id, edge_type) VALUES ('[PREFIX]-MESSAGE', '[PREFIX]-NEWTASK', 'discovered-from');
-
--- Close the message
+INSERT INTO edges (from_id, to_id, edge_type) VALUES ('[PREFIX]-NEWTASK', '[PREFIX]-MESSAGE', 'discovered-from');
 UPDATE shards SET status = 'closed' WHERE id = '[PREFIX]-MESSAGE';
 ```
 
@@ -426,15 +446,17 @@ SELECT * FROM tasks_for('[YOURPROJECT]', '[agent-YOURNAME]');
 -- Ready tasks
 SELECT * FROM ready_tasks('[YOURPROJECT]');
 
+-- Send message (simple)
+SELECT send_message('[YOURPROJECT]', '[agent-YOURNAME]', ARRAY['recipient'], 'subject', 'body');
+
+-- Send message with CC, kind, reply
+SELECT send_message('[YOURPROJECT]', '[agent-YOURNAME]', ARRAY['recipient'], 'Re: subject', 'body', ARRAY['cc-agent'], 'ack', '[PREFIX]-original');
+
 -- Create task
 SELECT create_shard('[YOURPROJECT]', 'title', 'description', 'task', '[agent-YOURNAME]');
 
--- Create task with owner/priority
-SELECT create_shard('[YOURPROJECT]', 'title', 'desc', 'task', '[agent-YOURNAME]', 'owner-agent', 2);
-
--- Send message
-SELECT create_shard('[YOURPROJECT]', 'subject', 'body', 'message', '[agent-YOURNAME]');
-INSERT INTO labels (shard_id, label) VALUES ('[PREFIX]-NEWID', 'to:recipient');
+-- Create task from bug report (auto-links and closes source)
+SELECT create_task_from('[YOURPROJECT]', '[agent-YOURNAME]', '[PREFIX]-bug-msg', 'fix: title', 'description', 1, 'owner-agent');
 
 -- Claim task
 UPDATE shards SET owner = '[agent-YOURNAME]', status = 'in_progress' WHERE id = '[PREFIX]-xxx' AND owner IS NULL;

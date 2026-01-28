@@ -166,7 +166,7 @@ CREATE TRIGGER shards_updated_at
 Simplify common queries - agents can use these instead of writing complex SQL.
 
 ```sql
--- Get unread messages for an agent
+-- Get unread messages for an agent (checks both to: and cc: labels)
 CREATE OR REPLACE FUNCTION unread_for(p_project TEXT, p_agent TEXT)
 RETURNS TABLE (id TEXT, title TEXT, creator TEXT, kind TEXT, created_at TIMESTAMPTZ) AS $$
   SELECT
@@ -177,7 +177,8 @@ RETURNS TABLE (id TEXT, title TEXT, creator TEXT, kind TEXT, created_at TIMESTAM
   JOIN labels l ON l.shard_id = s.id
   WHERE s.project = p_project
     AND s.type = 'message'
-    AND l.label = 'to:' || p_agent
+    AND s.status = 'open'
+    AND l.label IN ('to:' || p_agent, 'cc:' || p_agent)
     AND s.id NOT IN (SELECT shard_id FROM read_receipts WHERE agent_id = p_agent)
   ORDER BY s.created_at;
 $$ LANGUAGE sql;
@@ -221,13 +222,119 @@ RETURNS TABLE (id TEXT, title TEXT, creator TEXT, content TEXT, depth INT, creat
 $$ LANGUAGE sql;
 ```
 
+### send_message()
+
+Atomic message creation with labels and edges:
+
+```sql
+CREATE OR REPLACE FUNCTION send_message(
+  p_project TEXT,
+  p_sender TEXT,
+  p_recipients TEXT[],
+  p_subject TEXT,
+  p_body TEXT,
+  p_cc TEXT[] DEFAULT NULL,
+  p_kind TEXT DEFAULT NULL,
+  p_reply_to TEXT DEFAULT NULL
+) RETURNS TEXT AS $$
+DECLARE
+  new_id TEXT;
+  recipient TEXT;
+BEGIN
+  new_id := gen_shard_id(p_project);
+  INSERT INTO shards (id, project, title, content, type, status, creator)
+  VALUES (new_id, p_project, p_subject, p_body, 'message', 'open', p_sender);
+
+  FOREACH recipient IN ARRAY p_recipients LOOP
+    INSERT INTO labels (shard_id, label) VALUES (new_id, 'to:' || recipient);
+  END LOOP;
+
+  IF p_cc IS NOT NULL THEN
+    FOREACH recipient IN ARRAY p_cc LOOP
+      INSERT INTO labels (shard_id, label) VALUES (new_id, 'cc:' || recipient);
+    END LOOP;
+  END IF;
+
+  IF p_kind IS NOT NULL THEN
+    INSERT INTO labels (shard_id, label) VALUES (new_id, 'kind:' || p_kind);
+  END IF;
+
+  IF p_reply_to IS NOT NULL THEN
+    INSERT INTO edges (from_id, to_id, edge_type) VALUES (new_id, p_reply_to, 'replies-to');
+    INSERT INTO read_receipts (shard_id, agent_id) VALUES (p_reply_to, p_sender) ON CONFLICT DO NOTHING;
+  END IF;
+
+  RETURN new_id;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+### create_task_from()
+
+Create task from a source message with auto-linking:
+
+```sql
+CREATE OR REPLACE FUNCTION create_task_from(
+  p_project TEXT,
+  p_creator TEXT,
+  p_source_id TEXT,
+  p_title TEXT,
+  p_description TEXT,
+  p_priority INT DEFAULT 2,
+  p_owner TEXT DEFAULT NULL,
+  p_labels TEXT[] DEFAULT NULL
+) RETURNS TEXT AS $$
+DECLARE
+  new_id TEXT;
+  lbl TEXT;
+  source_label TEXT;
+BEGIN
+  new_id := gen_shard_id(p_project);
+  INSERT INTO shards (id, project, title, content, type, status, creator, owner, priority)
+  VALUES (new_id, p_project, p_title, p_description, 'task', 'open', p_creator, p_owner, p_priority);
+
+  INSERT INTO edges (from_id, to_id, edge_type) VALUES (new_id, p_source_id, 'discovered-from');
+
+  -- Copy component labels from source
+  FOR source_label IN
+    SELECT label FROM labels
+    WHERE shard_id = p_source_id
+    AND label NOT LIKE 'to:%' AND label NOT LIKE 'cc:%' AND label NOT LIKE 'kind:%'
+  LOOP
+    INSERT INTO labels (shard_id, label) VALUES (new_id, source_label) ON CONFLICT DO NOTHING;
+  END LOOP;
+
+  IF p_labels IS NOT NULL THEN
+    FOREACH lbl IN ARRAY p_labels LOOP
+      INSERT INTO labels (shard_id, label) VALUES (new_id, lbl) ON CONFLICT DO NOTHING;
+    END LOOP;
+  END IF;
+
+  -- Close source message
+  UPDATE shards SET status = 'closed' WHERE id = p_source_id AND type = 'message';
+
+  RETURN new_id;
+END;
+$$ LANGUAGE plpgsql;
+```
+
 ### Usage
 
 ```sql
+-- Send a message
+SELECT send_message('penfold', 'agent-cli', ARRAY['agent-backend'], 'Bug found', 'Details...', NULL, 'bug-report');
+
+-- Reply to a message
+SELECT send_message('penfold', 'agent-backend', ARRAY['agent-cli'], 'Re: Bug found', 'Looking into it', NULL, 'ack', 'pf-original');
+
+-- Create task from bug report
+SELECT create_task_from('penfold', 'agent-backend', 'pf-bug-msg', 'fix: Bug title', 'Description', 1, 'agent-backend');
+
+-- Other helpers
 SELECT * FROM unread_for('penfold', 'agent-backend');
 SELECT * FROM tasks_for('penfold', 'agent-backend');
 SELECT * FROM ready_tasks('penfold');
-SELECT * FROM get_thread('cp-abc123');
+SELECT * FROM get_thread('pf-abc123');
 ```
 
 ## Common Queries
