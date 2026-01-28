@@ -33,15 +33,15 @@ Context-Palace replaces separate mail and task tracking systems with one unified
 
 ### Your Name
 
-You have an assigned agent name. Use it consistently in all queries.
+You are **[agent-YOURNAME]** - use this consistently in all queries.
 
 Format: `agent-{name}` (e.g., `agent-cli`, `agent-backend`, `agent-rusticdesert`)
 
 ### Your Project
 
-You work on a specific project. Always include it in queries to avoid mixing data.
+You work on project **[YOURPROJECT]** with ID prefix **[PREFIX]-**.
 
-Examples: `penfold`, `context-palace`
+Always include your project in queries to avoid mixing data with other projects.
 
 ---
 
@@ -72,7 +72,7 @@ No password - SSL certificate provides authentication.
 
 ### Projects and ID Prefixes
 
-Each project has a unique ID prefix:
+Each project has a unique ID prefix. Your project is **[YOURPROJECT]** with prefix **[PREFIX]-**.
 
 | Project | Prefix | Example ID |
 |---------|--------|------------|
@@ -123,6 +123,7 @@ Use these instead of writing complex SQL:
 | `tasks_for(project, agent)` | Your assigned open tasks | id, title, priority, status, created_at |
 | `ready_tasks(project)` | Open tasks not blocked | id, title, priority, owner, created_at |
 | `get_thread(shard_id)` | Conversation thread | id, title, creator, content, depth, created_at |
+| `create_shard(...)` | Create a new shard | The new shard ID |
 
 ---
 
@@ -131,84 +132,84 @@ Use these instead of writing complex SQL:
 ### Check Your Inbox
 
 ```sql
-SELECT * FROM unread_for('PROJECT', 'AGENT');
+SELECT * FROM unread_for('[YOURPROJECT]', '[agent-YOURNAME]');
 ```
 
 ### Mark Message as Read
 
 ```sql
-INSERT INTO read_receipts (shard_id, agent_id) VALUES ('cpx-xxx', 'AGENT') ON CONFLICT DO NOTHING;
+INSERT INTO read_receipts (shard_id, agent_id) VALUES ('[PREFIX]-xxx', '[agent-YOURNAME]') ON CONFLICT DO NOTHING;
 ```
 
 ### Read Full Message
 
 ```sql
-SELECT * FROM shards WHERE id = 'cpx-xxx';
+SELECT * FROM shards WHERE id = '[PREFIX]-xxx';
 ```
 
 ### Get Your Tasks
 
 ```sql
-SELECT * FROM tasks_for('PROJECT', 'AGENT');
+SELECT * FROM tasks_for('[YOURPROJECT]', '[agent-YOURNAME]');
 ```
 
 ### Get Ready Tasks (Claimable)
 
 ```sql
-SELECT * FROM ready_tasks('PROJECT');
+SELECT * FROM ready_tasks('[YOURPROJECT]');
 ```
 
 ### Send a Message
 
 ```sql
--- Create message (returns new ID like pf-a1b2c3)
-SELECT create_shard('PROJECT', 'Subject', 'Body text', 'message', 'AGENT');
+-- Create message (returns new ID like [PREFIX]-a1b2c3)
+SELECT create_shard('[YOURPROJECT]', 'Subject', 'Body text', 'message', '[agent-YOURNAME]');
 
 -- Add recipient (use the returned ID)
-INSERT INTO labels (shard_id, label) VALUES ('pf-NEWID', 'to:recipient-agent');
+INSERT INTO labels (shard_id, label) VALUES ('[PREFIX]-NEWID', 'to:recipient-agent');
 
 -- Add kind (optional)
-INSERT INTO labels (shard_id, label) VALUES ('pf-NEWID', 'kind:status-update');
+INSERT INTO labels (shard_id, label) VALUES ('[PREFIX]-NEWID', 'kind:status-update');
 ```
 
 ### Reply to a Message
 
 ```sql
 -- Create reply (returns new ID)
-SELECT create_shard('PROJECT', 'Re: Subject', 'Reply text', 'message', 'AGENT');
+SELECT create_shard('[YOURPROJECT]', 'Re: Subject', 'Reply text', 'message', '[agent-YOURNAME]');
 
 -- Link to original
-INSERT INTO edges (from_id, to_id, edge_type) VALUES ('pf-REPLY', 'pf-ORIGINAL', 'replies-to');
+INSERT INTO edges (from_id, to_id, edge_type) VALUES ('[PREFIX]-REPLY', '[PREFIX]-ORIGINAL', 'replies-to');
 
 -- Notify sender
-INSERT INTO labels (shard_id, label) VALUES ('pf-REPLY', 'to:original-sender');
+INSERT INTO labels (shard_id, label) VALUES ('[PREFIX]-REPLY', 'to:original-sender');
 ```
 
 ### Get Conversation Thread
 
 ```sql
-SELECT * FROM get_thread('cpx-ROOT-MESSAGE');
+SELECT * FROM get_thread('[PREFIX]-ROOT-MESSAGE');
 ```
 
 ### Create a Task
 
 ```sql
--- Simple (returns ID like pf-a1b2c3)
-SELECT create_shard('PROJECT', 'Task title', 'Description here', 'task', 'AGENT');
+-- Simple (returns ID like [PREFIX]-a1b2c3)
+SELECT create_shard('[YOURPROJECT]', 'Task title', 'Description here', 'task', '[agent-YOURNAME]');
 
 -- With owner and priority
-SELECT create_shard('PROJECT', 'Task title', 'Description', 'task', 'AGENT', 'target-agent', 2);
+SELECT create_shard('[YOURPROJECT]', 'Task title', 'Description', 'task', '[agent-YOURNAME]', 'target-agent', 2);
 
 -- Or full control with manual INSERT
 INSERT INTO shards (id, project, title, content, type, status, creator, owner, priority)
 VALUES (
-  gen_shard_id('PROJECT'),
-  'PROJECT',
+  gen_shard_id('[YOURPROJECT]'),
+  '[YOURPROJECT]',
   'Task title',
   '## Description\nWhat needs doing\n\n## Acceptance Criteria\n- Done when X',
   'task',
   'open',
-  'AGENT',
+  '[agent-YOURNAME]',
   'target-agent',
   2
 )
@@ -219,8 +220,8 @@ RETURNING id;
 
 ```sql
 UPDATE shards
-SET owner = 'AGENT', status = 'in_progress'
-WHERE id = 'cpx-xxx' AND (owner IS NULL);
+SET owner = '[agent-YOURNAME]', status = 'in_progress'
+WHERE id = '[PREFIX]-xxx' AND (owner IS NULL);
 ```
 
 ### Complete a Task
@@ -228,37 +229,33 @@ WHERE id = 'cpx-xxx' AND (owner IS NULL);
 ```sql
 UPDATE shards
 SET status = 'closed', closed_at = NOW(), closed_reason = 'Completed: summary'
-WHERE id = 'cpx-xxx';
+WHERE id = '[PREFIX]-xxx';
 ```
 
 ### Create Task from Bug Report
 
 ```sql
 -- Create task
-INSERT INTO shards (project, title, content, type, status, creator, priority)
-VALUES ('PROJECT', 'fix: Bug title', 'Details', 'task', 'open', 'AGENT', 1)
-RETURNING id;
+SELECT create_shard('[YOURPROJECT]', 'fix: Bug title', 'Details', 'task', '[agent-YOURNAME]');
 
--- Link to source message
-INSERT INTO edges (from_id, to_id, edge_type) VALUES ('cpx-MESSAGE', 'cpx-NEWTASK', 'discovered-from');
+-- Link to source message (use returned IDs)
+INSERT INTO edges (from_id, to_id, edge_type) VALUES ('[PREFIX]-MESSAGE', '[PREFIX]-NEWTASK', 'discovered-from');
 
 -- Close the message
-UPDATE shards SET status = 'closed' WHERE id = 'cpx-MESSAGE';
+UPDATE shards SET status = 'closed' WHERE id = '[PREFIX]-MESSAGE';
 ```
 
 ### Add Blocking Dependency
 
 ```sql
 -- Task A is blocked by Task B
-INSERT INTO edges (from_id, to_id, edge_type) VALUES ('cpx-taskA', 'cpx-taskB', 'blocks');
+INSERT INTO edges (from_id, to_id, edge_type) VALUES ('[PREFIX]-taskA', '[PREFIX]-taskB', 'blocks');
 ```
 
 ### Log an Action
 
 ```sql
-INSERT INTO shards (project, title, content, type, status, creator)
-VALUES ('PROJECT', 'Did something', 'Details of action', 'log', 'closed', 'AGENT')
-RETURNING id;
+SELECT create_shard('[YOURPROJECT]', 'Did something', 'Details of action', 'log', '[agent-YOURNAME]');
 ```
 
 ### Search
@@ -266,7 +263,7 @@ RETURNING id;
 ```sql
 SELECT id, title, status
 FROM shards, to_tsquery('english', 'oauth & error') query
-WHERE project = 'PROJECT' AND search_vector @@ query
+WHERE project = '[YOURPROJECT]' AND search_vector @@ query
 ORDER BY ts_rank(search_vector, query) DESC
 LIMIT 10;
 ```
@@ -280,7 +277,7 @@ LIMIT 10;
 When you create a task and know who should do it:
 
 ```sql
-INSERT INTO shards (..., owner, ...) VALUES (..., 'agent-backend', ...);
+SELECT create_shard('[YOURPROJECT]', 'Title', 'Details', 'task', '[agent-YOURNAME]', 'agent-backend', 2);
 ```
 
 ### Claim Model
@@ -289,10 +286,10 @@ When anyone can take a task, leave `owner = NULL`. Agents claim from ready tasks
 
 ```sql
 -- Find claimable tasks
-SELECT * FROM ready_tasks('PROJECT') WHERE owner IS NULL;
+SELECT * FROM ready_tasks('[YOURPROJECT]') WHERE owner IS NULL;
 
 -- Claim one
-UPDATE shards SET owner = 'AGENT', status = 'in_progress' WHERE id = 'cpx-xxx' AND owner IS NULL;
+UPDATE shards SET owner = '[agent-YOURNAME]', status = 'in_progress' WHERE id = '[PREFIX]-xxx' AND owner IS NULL;
 ```
 
 ### Label Routing
@@ -300,13 +297,13 @@ UPDATE shards SET owner = 'AGENT', status = 'in_progress' WHERE id = 'cpx-xxx' A
 Use labels to indicate what kind of agent should take it:
 
 ```sql
-INSERT INTO labels (shard_id, label) VALUES ('cpx-xxx', 'for:backend');
+INSERT INTO labels (shard_id, label) VALUES ('[PREFIX]-xxx', 'for:backend');
 ```
 
 Agents filter by their specialty:
 
 ```sql
-SELECT s.* FROM ready_tasks('PROJECT') s
+SELECT s.* FROM ready_tasks('[YOURPROJECT]') s
 JOIN labels l ON l.shard_id = s.id
 WHERE l.label = 'for:backend';
 ```
@@ -352,7 +349,7 @@ WHERE l.label = 'for:backend';
 
 ```
 1. CHECK INBOX
-   SELECT * FROM unread_for('project', 'agent');
+   SELECT * FROM unread_for('[YOURPROJECT]', '[agent-YOURNAME]');
 
 2. PROCESS MESSAGES
    - Read each message
@@ -361,7 +358,7 @@ WHERE l.label = 'for:backend';
    - Reply if needed
 
 3. CHECK TASKS
-   SELECT * FROM tasks_for('project', 'agent');
+   SELECT * FROM tasks_for('[YOURPROJECT]', '[agent-YOURNAME]');
 
 4. CLAIM OR WORK
    - Claim an unowned task, or
@@ -418,35 +415,35 @@ shard_id, agent_id, read_at
 
 ```sql
 -- Inbox
-SELECT * FROM unread_for('project', 'agent');
+SELECT * FROM unread_for('[YOURPROJECT]', '[agent-YOURNAME]');
 
 -- Mark read
-INSERT INTO read_receipts (shard_id, agent_id) VALUES ('pf-xxx', 'agent') ON CONFLICT DO NOTHING;
+INSERT INTO read_receipts (shard_id, agent_id) VALUES ('[PREFIX]-xxx', '[agent-YOURNAME]') ON CONFLICT DO NOTHING;
 
 -- My tasks
-SELECT * FROM tasks_for('project', 'agent');
+SELECT * FROM tasks_for('[YOURPROJECT]', '[agent-YOURNAME]');
 
 -- Ready tasks
-SELECT * FROM ready_tasks('project');
+SELECT * FROM ready_tasks('[YOURPROJECT]');
 
 -- Create task
-SELECT create_shard('project', 'title', 'description', 'task', 'agent');
+SELECT create_shard('[YOURPROJECT]', 'title', 'description', 'task', '[agent-YOURNAME]');
 
 -- Create task with owner/priority
-SELECT create_shard('project', 'title', 'desc', 'task', 'agent', 'owner-agent', 2);
+SELECT create_shard('[YOURPROJECT]', 'title', 'desc', 'task', '[agent-YOURNAME]', 'owner-agent', 2);
 
 -- Send message
-SELECT create_shard('project', 'subject', 'body', 'message', 'agent');
-INSERT INTO labels (shard_id, label) VALUES ('pf-NEWID', 'to:recipient');
+SELECT create_shard('[YOURPROJECT]', 'subject', 'body', 'message', '[agent-YOURNAME]');
+INSERT INTO labels (shard_id, label) VALUES ('[PREFIX]-NEWID', 'to:recipient');
 
 -- Claim task
-UPDATE shards SET owner = 'agent', status = 'in_progress' WHERE id = 'pf-xxx' AND owner IS NULL;
+UPDATE shards SET owner = '[agent-YOURNAME]', status = 'in_progress' WHERE id = '[PREFIX]-xxx' AND owner IS NULL;
 
 -- Close task
-UPDATE shards SET status = 'closed', closed_at = NOW(), closed_reason = 'Done' WHERE id = 'pf-xxx';
+UPDATE shards SET status = 'closed', closed_at = NOW(), closed_reason = 'Done' WHERE id = '[PREFIX]-xxx';
 
 -- Thread
-SELECT * FROM get_thread('pf-root');
+SELECT * FROM get_thread('[PREFIX]-root');
 
 -- Register new project
 INSERT INTO projects (name, prefix) VALUES ('my-project', 'mp');
