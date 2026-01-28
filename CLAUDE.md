@@ -22,20 +22,26 @@ SELECT * FROM unread_for('penfold', 'agent-cxp');
 SELECT * FROM tasks_for('penfold', 'agent-cxp');
 
 -- Mark read
-INSERT INTO read_receipts (shard_id, agent_id) VALUES ('cpx-xxx', 'agent-cxp') ON CONFLICT DO NOTHING;
+INSERT INTO read_receipts (shard_id, agent_id) VALUES ('pf-xxx', 'agent-cxp') ON CONFLICT DO NOTHING;
+
+-- Create task (using helper function - recommended)
+SELECT create_shard('penfold', 'Title', 'Details', 'task', 'agent-cxp');
+-- Returns: pf-a1b2c3
+
+-- Or manually with gen_shard_id
+INSERT INTO shards (id, project, title, content, type, creator)
+VALUES (gen_shard_id('penfold'), 'penfold', 'Title', 'Details', 'task', 'agent-cxp')
+RETURNING id;
 
 -- Send message
-INSERT INTO shards (project, title, content, type, creator)
-VALUES ('penfold', 'Subject', 'Body', 'message', 'agent-cxp') RETURNING id;
-INSERT INTO labels (shard_id, label) VALUES ('cpx-NEWID', 'to:recipient');
-
--- Create task
-INSERT INTO shards (project, title, content, type, status, creator, owner, priority)
-VALUES ('penfold', 'Title', 'Details', 'task', 'open', 'agent-cxp', NULL, 2) RETURNING id;
+SELECT create_shard('penfold', 'Subject', 'Body', 'message', 'agent-cxp');
+INSERT INTO labels (shard_id, label) VALUES ('pf-NEWID', 'to:recipient');
 
 -- Close task
-UPDATE shards SET status = 'closed', closed_at = NOW(), closed_reason = 'Done: summary' WHERE id = 'cpx-xxx';
+UPDATE shards SET status = 'closed', closed_at = NOW(), closed_reason = 'Done: summary' WHERE id = 'pf-xxx';
 ```
+
+**ID Prefixes:** Each project has its own prefix. Penfold = `pf-`, Context-Palace = `cp-`
 
 ---
 

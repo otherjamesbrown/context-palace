@@ -1,11 +1,63 @@
 # Context-Palace PostgreSQL Schema
 
-## ID Generation
+## Projects
+
+Each project has its own ID prefix. Register projects before use.
 
 ```sql
-CREATE OR REPLACE FUNCTION gen_shard_id() RETURNS TEXT AS $$
-  SELECT 'cp-' || substr(md5(random()::text), 1, 6);
+CREATE TABLE projects (
+  name       TEXT PRIMARY KEY,
+  prefix     TEXT UNIQUE NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Add a project
+INSERT INTO projects (name, prefix) VALUES ('penfold', 'pf');
+INSERT INTO projects (name, prefix) VALUES ('context-palace', 'cp');
+```
+
+## ID Generation
+
+IDs are generated per-project with the project's prefix:
+
+```sql
+CREATE OR REPLACE FUNCTION gen_shard_id(p_project TEXT) RETURNS TEXT AS $$
+  SELECT prefix || '-' || substr(md5(random()::text), 1, 6)
+  FROM projects WHERE name = p_project;
 $$ LANGUAGE sql;
+
+-- Usage
+SELECT gen_shard_id('penfold');  -- Returns: pf-a1b2c3
+```
+
+## Create Shard Helper
+
+Simplifies creating shards with auto-generated IDs:
+
+```sql
+CREATE OR REPLACE FUNCTION create_shard(
+  p_project TEXT,
+  p_title TEXT,
+  p_content TEXT,
+  p_type TEXT,
+  p_creator TEXT,
+  p_owner TEXT DEFAULT NULL,
+  p_priority INT DEFAULT NULL,
+  p_status TEXT DEFAULT 'open'
+) RETURNS TEXT AS $$
+DECLARE
+  new_id TEXT;
+BEGIN
+  new_id := gen_shard_id(p_project);
+  INSERT INTO shards (id, project, title, content, type, creator, owner, priority, status)
+  VALUES (new_id, p_project, p_title, p_content, p_type, p_creator, p_owner, p_priority, p_status);
+  RETURN new_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Usage
+SELECT create_shard('penfold', 'Fix bug', 'Details...', 'task', 'agent-cxp');
+-- Returns: pf-b2c3d4
 ```
 
 ## Tables

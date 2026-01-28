@@ -66,9 +66,23 @@ No password - SSL certificate provides authentication.
 | Concept | Description |
 |---------|-------------|
 | **Shard** | Everything is a shard - tasks, messages, logs, configs |
-| **Project** | Namespace separating data between projects |
+| **Project** | Namespace separating data between projects (each has unique ID prefix) |
 | **Edge** | Relationship between shards (blocks, replies-to, relates-to) |
 | **Label** | Tags on shards (recipients, categories) |
+
+### Projects and ID Prefixes
+
+Each project has a unique ID prefix:
+
+| Project | Prefix | Example ID |
+|---------|--------|------------|
+| penfold | `pf` | `pf-a1b2c3` |
+| context-palace | `cp` | `cp-d4e5f6` |
+
+Register new projects:
+```sql
+INSERT INTO projects (name, prefix) VALUES ('my-project', 'mp');
+```
 
 ### Shard Types
 
@@ -147,31 +161,27 @@ SELECT * FROM ready_tasks('PROJECT');
 ### Send a Message
 
 ```sql
--- Create message
-INSERT INTO shards (project, title, content, type, creator)
-VALUES ('PROJECT', 'Subject', 'Body text', 'message', 'AGENT')
-RETURNING id;
+-- Create message (returns new ID like pf-a1b2c3)
+SELECT create_shard('PROJECT', 'Subject', 'Body text', 'message', 'AGENT');
 
--- Add recipient
-INSERT INTO labels (shard_id, label) VALUES ('cpx-NEWID', 'to:recipient-agent');
+-- Add recipient (use the returned ID)
+INSERT INTO labels (shard_id, label) VALUES ('pf-NEWID', 'to:recipient-agent');
 
 -- Add kind (optional)
-INSERT INTO labels (shard_id, label) VALUES ('cpx-NEWID', 'kind:status-update');
+INSERT INTO labels (shard_id, label) VALUES ('pf-NEWID', 'kind:status-update');
 ```
 
 ### Reply to a Message
 
 ```sql
--- Create reply
-INSERT INTO shards (project, title, content, type, creator)
-VALUES ('PROJECT', 'Re: Subject', 'Reply text', 'message', 'AGENT')
-RETURNING id;
+-- Create reply (returns new ID)
+SELECT create_shard('PROJECT', 'Re: Subject', 'Reply text', 'message', 'AGENT');
 
 -- Link to original
-INSERT INTO edges (from_id, to_id, edge_type) VALUES ('cpx-REPLY', 'cpx-ORIGINAL', 'replies-to');
+INSERT INTO edges (from_id, to_id, edge_type) VALUES ('pf-REPLY', 'pf-ORIGINAL', 'replies-to');
 
 -- Notify sender
-INSERT INTO labels (shard_id, label) VALUES ('cpx-REPLY', 'to:original-sender');
+INSERT INTO labels (shard_id, label) VALUES ('pf-REPLY', 'to:original-sender');
 ```
 
 ### Get Conversation Thread
@@ -183,16 +193,24 @@ SELECT * FROM get_thread('cpx-ROOT-MESSAGE');
 ### Create a Task
 
 ```sql
-INSERT INTO shards (project, title, content, type, status, creator, owner, priority)
+-- Simple (returns ID like pf-a1b2c3)
+SELECT create_shard('PROJECT', 'Task title', 'Description here', 'task', 'AGENT');
+
+-- With owner and priority
+SELECT create_shard('PROJECT', 'Task title', 'Description', 'task', 'AGENT', 'target-agent', 2);
+
+-- Or full control with manual INSERT
+INSERT INTO shards (id, project, title, content, type, status, creator, owner, priority)
 VALUES (
+  gen_shard_id('PROJECT'),
   'PROJECT',
   'Task title',
   '## Description\nWhat needs doing\n\n## Acceptance Criteria\n- Done when X',
   'task',
   'open',
-  'AGENT',         -- you (creator)
-  'target-agent',  -- who should do it (or NULL)
-  2                -- priority
+  'AGENT',
+  'target-agent',
+  2
 )
 RETURNING id;
 ```
@@ -403,7 +421,7 @@ shard_id, agent_id, read_at
 SELECT * FROM unread_for('project', 'agent');
 
 -- Mark read
-INSERT INTO read_receipts (shard_id, agent_id) VALUES ('cpx-x', 'agent') ON CONFLICT DO NOTHING;
+INSERT INTO read_receipts (shard_id, agent_id) VALUES ('pf-xxx', 'agent') ON CONFLICT DO NOTHING;
 
 -- My tasks
 SELECT * FROM tasks_for('project', 'agent');
@@ -411,19 +429,25 @@ SELECT * FROM tasks_for('project', 'agent');
 -- Ready tasks
 SELECT * FROM ready_tasks('project');
 
--- Send message
-INSERT INTO shards (project, title, content, type, creator) VALUES ('p', 'subj', 'body', 'message', 'agent') RETURNING id;
-INSERT INTO labels (shard_id, label) VALUES ('cpx-x', 'to:recipient');
-
 -- Create task
-INSERT INTO shards (project, title, content, type, status, creator, owner, priority) VALUES ('p', 'title', 'desc', 'task', 'open', 'agent', NULL, 2) RETURNING id;
+SELECT create_shard('project', 'title', 'description', 'task', 'agent');
+
+-- Create task with owner/priority
+SELECT create_shard('project', 'title', 'desc', 'task', 'agent', 'owner-agent', 2);
+
+-- Send message
+SELECT create_shard('project', 'subject', 'body', 'message', 'agent');
+INSERT INTO labels (shard_id, label) VALUES ('pf-NEWID', 'to:recipient');
 
 -- Claim task
-UPDATE shards SET owner = 'agent', status = 'in_progress' WHERE id = 'cpx-x' AND owner IS NULL;
+UPDATE shards SET owner = 'agent', status = 'in_progress' WHERE id = 'pf-xxx' AND owner IS NULL;
 
 -- Close task
-UPDATE shards SET status = 'closed', closed_at = NOW(), closed_reason = 'Done' WHERE id = 'cpx-x';
+UPDATE shards SET status = 'closed', closed_at = NOW(), closed_reason = 'Done' WHERE id = 'pf-xxx';
 
 -- Thread
-SELECT * FROM get_thread('cpx-root');
+SELECT * FROM get_thread('pf-root');
+
+-- Register new project
+INSERT INTO projects (name, prefix) VALUES ('my-project', 'mp');
 ```
