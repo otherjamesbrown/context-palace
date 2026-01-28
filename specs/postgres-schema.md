@@ -318,6 +318,81 @@ END;
 $$ LANGUAGE plpgsql;
 ```
 
+### mark_read() and mark_all_read()
+
+Bulk mark messages as read:
+
+```sql
+-- Mark specific messages as read
+CREATE OR REPLACE FUNCTION mark_read(p_shard_ids TEXT[], p_agent TEXT)
+RETURNS INT AS $$
+DECLARE
+  shard_id TEXT;
+  count INT := 0;
+BEGIN
+  FOREACH shard_id IN ARRAY p_shard_ids LOOP
+    INSERT INTO read_receipts (shard_id, agent_id) VALUES (shard_id, p_agent) ON CONFLICT DO NOTHING;
+    count := count + 1;
+  END LOOP;
+  RETURN count;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Mark all unread messages as read
+CREATE OR REPLACE FUNCTION mark_all_read(p_project TEXT, p_agent TEXT)
+RETURNS INT AS $$
+DECLARE
+  count INT;
+BEGIN
+  WITH unread AS (
+    SELECT s.id FROM shards s
+    JOIN labels l ON l.shard_id = s.id
+    WHERE s.project = p_project
+      AND s.type = 'message'
+      AND s.status = 'open'
+      AND l.label IN ('to:' || p_agent, 'cc:' || p_agent)
+      AND s.id NOT IN (SELECT shard_id FROM read_receipts WHERE agent_id = p_agent)
+  )
+  INSERT INTO read_receipts (shard_id, agent_id)
+  SELECT id, p_agent FROM unread
+  ON CONFLICT DO NOTHING;
+
+  GET DIAGNOSTICS count = ROW_COUNT;
+  RETURN count;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+### link() and add_labels()
+
+Shortcuts for common operations:
+
+```sql
+-- Create edge (shorter than INSERT INTO edges)
+CREATE OR REPLACE FUNCTION link(p_from_id TEXT, p_to_id TEXT, p_edge_type TEXT)
+RETURNS VOID AS $$
+BEGIN
+  INSERT INTO edges (from_id, to_id, edge_type) VALUES (p_from_id, p_to_id, p_edge_type)
+  ON CONFLICT DO NOTHING;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Add multiple labels at once
+CREATE OR REPLACE FUNCTION add_labels(p_shard_id TEXT, p_labels TEXT[])
+RETURNS INT AS $$
+DECLARE
+  lbl TEXT;
+  count INT := 0;
+BEGIN
+  FOREACH lbl IN ARRAY p_labels LOOP
+    INSERT INTO labels (shard_id, label) VALUES (p_shard_id, lbl) ON CONFLICT DO NOTHING;
+    count := count + 1;
+  END LOOP;
+  RETURN count;
+END;
+$$ LANGUAGE plpgsql;
+```
+
 ### Usage
 
 ```sql
@@ -330,7 +405,15 @@ SELECT send_message('penfold', 'agent-backend', ARRAY['agent-cli'], 'Re: Bug fou
 -- Create task from bug report
 SELECT create_task_from('penfold', 'agent-backend', 'pf-bug-msg', 'fix: Bug title', 'Description', 1, 'agent-backend');
 
--- Other helpers
+-- Bulk mark as read
+SELECT mark_read(ARRAY['pf-msg1', 'pf-msg2'], 'agent-cli');
+SELECT mark_all_read('penfold', 'agent-cli');
+
+-- Quick edge and labels
+SELECT link('pf-task', 'pf-doc', 'relates-to');
+SELECT add_labels('pf-task', ARRAY['urgent', 'backend', 'bug']);
+
+-- Query helpers
 SELECT * FROM unread_for('penfold', 'agent-backend');
 SELECT * FROM tasks_for('penfold', 'agent-backend');
 SELECT * FROM ready_tasks('penfold');

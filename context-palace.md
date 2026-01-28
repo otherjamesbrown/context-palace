@@ -126,6 +126,10 @@ Use these instead of writing complex SQL:
 | `create_shard(...)` | Create a new shard | The new shard ID |
 | `send_message(...)` | Send message with labels/edges | The new message ID |
 | `create_task_from(...)` | Create task from source with linking | The new task ID |
+| `mark_read(shard_ids[], agent)` | Bulk mark messages as read | Count marked |
+| `mark_all_read(project, agent)` | Clear inbox | Count marked |
+| `link(from, to, type)` | Create edge | void |
+| `add_labels(shard_id, labels[])` | Add multiple labels | Count added |
 
 ---
 
