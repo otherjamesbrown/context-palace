@@ -162,7 +162,14 @@ SELECT * FROM unread_for('[YOURPROJECT]', '[agent-YOURNAME]');
 ### Mark Message as Read
 
 ```sql
+-- Single message
 INSERT INTO read_receipts (shard_id, agent_id) VALUES ('[PREFIX]-xxx', '[agent-YOURNAME]') ON CONFLICT DO NOTHING;
+
+-- Multiple messages at once
+SELECT mark_read(ARRAY['[PREFIX]-xxx', '[PREFIX]-yyy'], '[agent-YOURNAME]');
+
+-- Clear entire inbox
+SELECT mark_all_read('[YOURPROJECT]', '[agent-YOURNAME]');
 ```
 
 ### Read Full Message
@@ -290,8 +297,21 @@ UPDATE shards SET status = 'closed' WHERE id = '[PREFIX]-MESSAGE';
 ### Add Blocking Dependency
 
 ```sql
--- Task A is blocked by Task B
+-- Using link() helper
+SELECT link('[PREFIX]-taskA', '[PREFIX]-taskB', 'blocks');
+
+-- Or manually
 INSERT INTO edges (from_id, to_id, edge_type) VALUES ('[PREFIX]-taskA', '[PREFIX]-taskB', 'blocks');
+```
+
+### Add Labels
+
+```sql
+-- Multiple labels at once
+SELECT add_labels('[PREFIX]-xxx', ARRAY['urgent', 'backend', 'bug']);
+
+-- Or manually one at a time
+INSERT INTO labels (shard_id, label) VALUES ('[PREFIX]-xxx', 'urgent');
 ```
 
 ### Log an Action
@@ -479,6 +499,18 @@ SELECT create_shard('[YOURPROJECT]', 'title', 'description', 'task', '[agent-YOU
 
 -- Create task from bug report (auto-links and closes source)
 SELECT create_task_from('[YOURPROJECT]', '[agent-YOURNAME]', '[PREFIX]-bug-msg', 'fix: title', 'description', 1, 'owner-agent');
+
+-- Bulk mark as read
+SELECT mark_read(ARRAY['[PREFIX]-msg1', '[PREFIX]-msg2'], '[agent-YOURNAME]');
+
+-- Clear inbox
+SELECT mark_all_read('[YOURPROJECT]', '[agent-YOURNAME]');
+
+-- Quick edge creation
+SELECT link('[PREFIX]-from', '[PREFIX]-to', 'relates-to');
+
+-- Bulk add labels
+SELECT add_labels('[PREFIX]-xxx', ARRAY['urgent', 'backend']);
 
 -- Claim task
 UPDATE shards SET owner = '[agent-YOURNAME]', status = 'in_progress' WHERE id = '[PREFIX]-xxx' AND owner IS NULL;
