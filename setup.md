@@ -430,7 +430,190 @@ Replace `PROJECT_NAME`, `AGENT_NAME`, and `PREFIX` with actual values in all thr
 
 ---
 
-## Step 6: Add Context-Palace Section to CLAUDE.md
+## Step 6: Create Background Mail Agents
+
+Create the `.claude/agents/` directory and add background agents for mail handling.
+
+```bash
+mkdir -p .claude/agents
+```
+
+### 6a: Create `mail-listener` agent
+
+Create `.claude/agents/mail-listener.md`:
+
+```markdown
+---
+name: mail-listener
+description: Background agent that listens for Context-Palace messages. Use proactively when user wants to monitor inbox or wait for responses.
+tools: Bash, Read
+model: haiku
+---
+
+You are a background mail listener for Context-Palace project **PROJECT_NAME**.
+
+## Your Identity
+
+- **Project:** PROJECT_NAME
+- **Agent:** AGENT_NAME
+- **Prefix:** PREFIX
+
+## Connection
+
+```bash
+psql "host=dev02.brown.chat dbname=contextpalace user=penfold sslmode=verify-full" -c "SQL"
+```
+
+## Tasks
+
+### Poll for Messages
+
+Check every 5-10 seconds:
+
+```sql
+SELECT s.id, s.title, s.creator, s.content
+FROM shards s
+JOIN labels l ON l.shard_id = s.id
+WHERE s.project = 'PROJECT_NAME'
+  AND s.type = 'message'
+  AND s.status = 'open'
+  AND l.label IN ('to:AGENT_NAME', 'cc:AGENT_NAME')
+  AND s.id NOT IN (SELECT shard_id FROM read_receipts WHERE agent_id = 'AGENT_NAME')
+ORDER BY s.created_at;
+```
+
+### Handle Sync Messages
+
+For messages with `sync:true` label:
+1. Parse JSON frontmatter for `poll_hint`
+2. Process based on type (bug, question, request)
+3. Respond with appropriate `poll_hint` (continue/done)
+
+### Return Results
+
+Return summary when messages arrive:
+
+```
+## Inbox Update
+
+**New messages:** N
+
+1. [PREFIX-xxx] "Subject" from sender (type)
+   - Status: needs attention / handled
+```
+
+## Timeouts
+
+- Poll interval: 5 seconds
+- Max runtime: 30 minutes
+- Warn at 25 minutes
+```
+
+### 6b: Create `mail-sender` agent
+
+Create `.claude/agents/mail-sender.md`:
+
+```markdown
+---
+name: mail-sender
+description: Background agent that sends a Context-Palace message and waits for response. Use when sending sync messages.
+tools: Bash, Read
+model: haiku
+---
+
+You are a background mail sender for Context-Palace project **PROJECT_NAME**.
+
+## Your Identity
+
+- **Project:** PROJECT_NAME
+- **Agent:** AGENT_NAME
+- **Prefix:** PREFIX
+
+## Connection
+
+```bash
+psql "host=dev02.brown.chat dbname=contextpalace user=penfold sslmode=verify-full" -c "SQL"
+```
+
+## Tasks
+
+When invoked, you'll receive: RECIPIENT, SUBJECT, BODY, TYPE
+
+### 1. Generate Session ID
+
+```bash
+SESSION_ID=$(uuidgen | tr '[:upper:]' '[:lower:]' | cut -d'-' -f1-2)
+```
+
+### 2. Send Message
+
+Format with JSON frontmatter:
+```
+{
+  "poll_hint": "continue",
+  "type": "TYPE",
+  "session": "SESSION_ID"
+}
+
+## SUBJECT
+
+BODY
+
+-- AGENT_NAME
+```
+
+Send:
+```sql
+SELECT send_message('PROJECT_NAME', 'AGENT_NAME', ARRAY['RECIPIENT'], 'SUBJECT', $body$CONTENT$body$);
+SELECT add_labels('PREFIX-NEWID', ARRAY['sync:true', 'sync:session-SESSION_ID']);
+```
+
+### 3. Poll for Response
+
+Every 5 seconds, check for replies:
+
+```sql
+SELECT s.id, s.content FROM shards s
+JOIN edges e ON e.from_id = s.id
+WHERE e.to_id = 'ORIGINAL_ID' AND e.edge_type = 'replies-to'
+  AND s.id NOT IN (SELECT shard_id FROM read_receipts WHERE agent_id = 'AGENT_NAME')
+LIMIT 1;
+```
+
+### 4. Handle poll_hint
+
+- `continue` - Return response to main agent
+- `done` - Conversation complete, return summary
+- `pause` - Wait, then resume
+- `typing` - Reset timeout, continue
+
+### 5. Return Results
+
+```
+## Message Sent
+
+To: RECIPIENT | Subject: SUBJECT | ID: PREFIX-xxx
+
+## Response Received
+
+From: RECIPIENT | poll_hint: done
+
+[Content]
+
+## Status: Complete
+```
+
+## Timeouts
+
+- Max wait: 30 minutes
+- Return timeout status if no response
+```
+
+Replace `PROJECT_NAME`, `AGENT_NAME`, and `PREFIX` with actual values in both files.
+
+---
+
+## Step 7: Add Context-Palace Section to CLAUDE.md
 
 If CLAUDE.md doesn't exist, create it. If it exists, append to it.
 
@@ -505,7 +688,7 @@ Replace `AGENT_NAME`, `PROJECT_NAME`, and `PREFIX` with the actual values.
 
 ---
 
-## Step 7: Verify SSL Certificates
+## Step 8: Verify SSL Certificates
 
 Check if PostgreSQL SSL certificates exist:
 
@@ -523,7 +706,7 @@ If these files don't exist, warn the user:
 
 ---
 
-## Step 8: Test Connection
+## Step 9: Test Connection
 
 Test the database connection:
 
@@ -539,13 +722,13 @@ If successful, you'll see:
 ```
 
 If it fails, report the error to the user. Common issues:
-- SSL certs not installed (Step 7)
+- SSL certs not installed (Step 8)
 - Network/firewall blocking port 5432
 - Database server down
 
 ---
 
-## Step 9: Register Project (if new)
+## Step 10: Register Project (if new)
 
 Check if the project exists:
 
@@ -561,7 +744,7 @@ psql "host=dev02.brown.chat dbname=contextpalace user=penfold sslmode=verify-ful
 
 ---
 
-## Step 10: Confirm Setup
+## Step 11: Confirm Setup
 
 Report to the user:
 
@@ -570,9 +753,8 @@ Report to the user:
 > **Files created:**
 > - `context-palace.md` - Full reference guide
 > - `PREFIX-rules.md` - Project-specific rules (customize this!)
-> - `.claude/commands/mail-check.md` - Check inbox command
-> - `.claude/commands/mail-send-wait.md` - Send sync message command
-> - `.claude/commands/mail-listen.md` - Listen for sync messages command
+> - `.claude/commands/mail-*.md` - Mail slash commands
+> - `.claude/agents/mail-*.md` - Background mail agents
 >
 > **Configuration:**
 > - Agent: **AGENT_NAME**
@@ -583,6 +765,10 @@ Report to the user:
 > - `/mail-check` - Check and process inbox
 > - `/mail-send-wait` - Send message and wait for reply
 > - `/mail-listen` - Listen for incoming sync messages
+>
+> **Background agents (run with Ctrl+B):**
+> - `mail-listener` - Monitor inbox in background
+> - `mail-sender` - Send message and wait for reply in background
 >
 > **Next steps:**
 > 1. Review and customize `PREFIX-rules.md` for your project
