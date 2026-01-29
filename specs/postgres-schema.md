@@ -60,6 +60,51 @@ SELECT create_shard('penfold', 'Fix bug', 'Details...', 'task', 'agent-cxp');
 -- Returns: pf-b2c3d4
 ```
 
+## Create Named Shard Helper
+
+Creates shards with memorable IDs like `pf-rules` instead of random hashes.
+Use for important project documents that need stable, memorable references.
+
+```sql
+CREATE OR REPLACE FUNCTION create_named_shard(
+  p_project TEXT,
+  p_name TEXT,           -- The memorable name (e.g., 'rules', 'config')
+  p_title TEXT,
+  p_content TEXT,
+  p_type TEXT,
+  p_creator TEXT,
+  p_owner TEXT DEFAULT NULL,
+  p_priority INT DEFAULT NULL,
+  p_status TEXT DEFAULT 'open'
+) RETURNS TEXT AS $$
+DECLARE
+  new_id TEXT;
+  prefix TEXT;
+BEGIN
+  SELECT projects.prefix INTO prefix FROM projects WHERE name = p_project;
+  new_id := prefix || '-' || p_name;
+
+  INSERT INTO shards (id, project, title, content, type, creator, owner, priority, status)
+  VALUES (new_id, p_project, p_title, p_content, p_type, p_creator, p_owner, p_priority, p_status)
+  ON CONFLICT (id) DO UPDATE SET
+    title = EXCLUDED.title,
+    content = EXCLUDED.content,
+    updated_at = NOW();
+
+  RETURN new_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Usage
+SELECT create_named_shard('penfold', 'rules', 'Project Rules', '# Rules...', 'doc', 'agent-cxp');
+-- Returns: pf-rules (creates or updates)
+```
+
+**Conventions for named shards:**
+- `{prefix}-rules` - Project rules and conventions
+- `{prefix}-config` - Project configuration
+- `{prefix}-readme` - Project overview
+
 ## Tables
 
 ### shards

@@ -68,6 +68,20 @@ Create a file named `{PREFIX}-rules.md` (e.g., `pf-rules.md`) with project-speci
 
 **This file is project-specific and will NOT be overwritten during updates.**
 
+### 4a: Check for Existing Rules in Database
+
+First, check if a rules shard already exists in Context-Palace:
+
+```bash
+psql "host=dev02.brown.chat dbname=contextpalace user=penfold sslmode=verify-full" -t -A -c "SELECT content FROM shards WHERE id = 'PREFIX-rules';"
+```
+
+**If content is returned:** Write that content to `{PREFIX}-rules.md` (with placeholders replaced).
+
+**If no rows returned:** Create a default rules file using the template below.
+
+### 4b: Write Rules File
+
 Write this content (replace PREFIX, PROJECT_NAME, AGENT_NAME):
 
 ```markdown
@@ -132,6 +146,25 @@ When starting a session:
 Add any project-specific Context-Palace usage notes here:
 - (Add your own)
 ```
+
+### 4c: Sync Rules to Database
+
+After creating the local rules file, sync it to Context-Palace so other agents can access it:
+
+```bash
+psql "host=dev02.brown.chat dbname=contextpalace user=penfold sslmode=verify-full" <<EOSQL
+SELECT create_named_shard(
+  'PROJECT_NAME',
+  'rules',
+  'Project Rules for PROJECT_NAME',
+  \$body\$CONTENT_OF_RULES_FILE\$body\$,
+  'doc',
+  'AGENT_NAME'
+);
+EOSQL
+```
+
+This creates a shard with ID `PREFIX-rules` that other agents can pull from.
 
 ---
 
@@ -349,11 +382,35 @@ Use `replace_all: true` for each replacement.
 
 ---
 
-## Step U4: DO NOT Touch Rules File
+## Step U4: Check for Rules Updates (Optional)
 
-**IMPORTANT:** The `{PREFIX}-rules.md` file contains project-specific customizations. Do NOT overwrite or modify it during updates.
+**By default:** Do NOT touch the local `{PREFIX}-rules.md` file - it contains project-specific customizations.
 
-If the user wants to reset the rules file to defaults, they must explicitly request it.
+**However:** Check if another agent has updated the rules in the database:
+
+```bash
+psql "host=dev02.brown.chat dbname=contextpalace user=penfold sslmode=verify-full" -t -A -c "SELECT updated_at FROM shards WHERE id = 'PREFIX-rules';"
+```
+
+If the database version is newer than the local file, ask the user:
+
+> The rules shard in Context-Palace (PREFIX-rules) was updated on [DATE].
+> Your local file may be outdated. Would you like to:
+> 1. **Pull from database** - Download the latest rules from Context-Palace
+> 2. **Keep local** - Keep your local version (you can push it to sync)
+> 3. **Push to database** - Update Context-Palace with your local version
+
+To pull from database:
+```bash
+psql "host=dev02.brown.chat dbname=contextpalace user=penfold sslmode=verify-full" -t -A -c "SELECT content FROM shards WHERE id = 'PREFIX-rules';" > PREFIX-rules.md
+```
+
+To push to database:
+```bash
+psql "host=dev02.brown.chat dbname=contextpalace user=penfold sslmode=verify-full" <<EOSQL
+SELECT create_named_shard('PROJECT_NAME', 'rules', 'Project Rules', \$body\$LOCAL_FILE_CONTENT\$body\$, 'doc', 'AGENT_NAME');
+EOSQL
+```
 
 ---
 

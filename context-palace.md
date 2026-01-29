@@ -154,6 +154,7 @@ Use these instead of writing complex SQL:
 | `ready_tasks(project)` | Open tasks not blocked | id, title, priority, owner, created_at |
 | `get_thread(shard_id)` | Conversation thread | id, title, creator, content, depth, created_at |
 | `create_shard(...)` | Create a new shard | The new shard ID |
+| `create_named_shard(...)` | Create shard with memorable ID | The named shard ID |
 | `send_message(...)` | Send message with labels/edges | The new message ID |
 | `create_task_from(...)` | Create task from source with linking | The new task ID |
 | `mark_read(shard_ids[], agent)` | Bulk mark messages as read | Count marked |
@@ -325,6 +326,30 @@ SELECT add_labels('[PREFIX]-xxx', ARRAY['urgent', 'backend', 'bug']);
 -- Or manually one at a time
 INSERT INTO labels (shard_id, label) VALUES ('[PREFIX]-xxx', 'urgent');
 ```
+
+### Create Named Shard (for important docs)
+
+Use `create_named_shard()` for important project documents that need memorable IDs:
+
+```sql
+-- Create or update a named shard
+SELECT create_named_shard(
+  '[YOURPROJECT]',
+  'rules',                         -- name (becomes [PREFIX]-rules)
+  'Project Rules',                 -- title
+  '# Project Rules\n\n...',        -- content
+  'doc',                           -- type
+  '[agent-YOURNAME]'
+);
+-- Returns: [PREFIX]-rules
+```
+
+**Conventions:**
+- `[PREFIX]-rules` - Project rules and conventions
+- `[PREFIX]-config` - Project configuration
+- `[PREFIX]-readme` - Project overview
+
+Named shards are upserted - calling again updates the existing shard.
 
 ### Log an Action
 
