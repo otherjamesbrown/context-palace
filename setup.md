@@ -168,7 +168,269 @@ This creates a shard with ID `PREFIX-rules` that other agents can pull from.
 
 ---
 
-## Step 5: Add Context-Palace Section to CLAUDE.md
+## Step 5: Create Mail Slash Commands
+
+Create the `.claude/commands/` directory and add the mail commands with your identity filled in.
+
+```bash
+mkdir -p .claude/commands
+```
+
+### 5a: Create `/mail-check`
+
+Create `.claude/commands/mail-check.md`:
+
+```markdown
+# /mail-check
+
+Check your Context-Palace inbox for unread messages.
+
+## Instructions
+
+1. Query your inbox:
+```sql
+psql "host=dev02.brown.chat dbname=contextpalace user=penfold sslmode=verify-full" -c "SELECT * FROM unread_for('PROJECT_NAME', 'AGENT_NAME');"
+```
+
+2. If there are messages, read each one:
+```sql
+psql "host=dev02.brown.chat dbname=contextpalace user=penfold sslmode=verify-full" -c "SELECT id, title, creator, content FROM shards WHERE id = 'PREFIX-xxx';"
+```
+
+3. Process messages:
+   - For bug reports: Create task with `create_task_from()`
+   - For questions: Reply with answer
+   - For status updates: Acknowledge and mark read
+
+4. Mark processed messages as read:
+```sql
+psql "host=dev02.brown.chat dbname=contextpalace user=penfold sslmode=verify-full" -c "SELECT mark_read(ARRAY['PREFIX-xxx'], 'AGENT_NAME');"
+```
+
+5. Report summary to user:
+   - Number of messages
+   - Actions taken
+   - Any items needing human attention
+```
+
+### 5b: Create `/mail-send-wait`
+
+Create `.claude/commands/mail-send-wait.md`:
+
+```markdown
+# /mail-send-wait
+
+Send a message and wait for a response (synchronous conversation).
+
+## Arguments
+
+- `$ARGUMENTS` - Format: `recipient subject` (e.g., `agent-backend Bug: API timeout`)
+
+## Instructions
+
+### 1. Parse Arguments
+
+Extract recipient and subject from arguments.
+
+### 2. Generate Session ID
+
+```bash
+SESSION_ID=$(uuidgen | tr '[:upper:]' '[:lower:]' | cut -d'-' -f1-2)
+```
+
+### 3. Compose Message
+
+Ask the user for the message body. Structure it as:
+
+```
+{
+  "poll_hint": "continue",
+  "type": "bug|question|request",
+  "session": "SESSION_ID"
+}
+
+## Subject
+
+Message body here...
+
+-- AGENT_NAME
+```
+
+### 4. Send Message
+
+```sql
+psql "host=dev02.brown.chat dbname=contextpalace user=penfold sslmode=verify-full" <<EOSQL
+SELECT send_message(
+  'PROJECT_NAME',
+  'AGENT_NAME',
+  ARRAY['RECIPIENT'],
+  'SUBJECT',
+  \$body\$MESSAGE_CONTENT\$body\$
+);
+EOSQL
+```
+
+Then add sync labels:
+```sql
+SELECT add_labels('PREFIX-NEWID', ARRAY['sync:true', 'sync:session-SESSION_ID']);
+```
+
+### 5. Poll for Response
+
+Poll every 5 seconds for replies:
+
+```bash
+for i in {1..360}; do  # 30 min max
+  RESPONSE=$(psql ... -t -A -c "
+    SELECT id, content FROM shards s
+    JOIN edges e ON e.from_id = s.id
+    WHERE e.to_id = 'PREFIX-ORIGINAL' AND e.edge_type = 'replies-to'
+    AND s.id NOT IN (SELECT shard_id FROM read_receipts WHERE agent_id = 'AGENT_NAME')
+    ORDER BY s.created_at DESC LIMIT 1;
+  ")
+
+  if [ -n "$RESPONSE" ]; then
+    # Process response
+    # Check poll_hint
+    break
+  fi
+
+  sleep 5
+done
+```
+
+### 6. Handle poll_hint
+
+- `continue` - Keep polling, show response to user, ask for reply
+- `done` - Conversation complete, mark all as read, exit
+- `pause` - Sleep for `resume_in` seconds, then continue polling
+- `typing` - Reset timeout, continue polling
+
+### 7. Timeout Handling
+
+- **30 minutes**: Warn user "Conversation running long"
+- **60 minutes**: Auto-send `poll_hint: done` message and exit
+
+### 8. End Conversation
+
+When done, mark all session messages as read:
+```sql
+SELECT mark_all_read('PROJECT_NAME', 'AGENT_NAME');
+```
+```
+
+### 5c: Create `/mail-listen`
+
+Create `.claude/commands/mail-listen.md`:
+
+```markdown
+# /mail-listen
+
+Listen for incoming synchronous messages and respond.
+
+## Instructions
+
+### 1. Poll for Sync Messages
+
+Query for unread messages with `sync:true` label:
+
+```sql
+psql "host=dev02.brown.chat dbname=contextpalace user=penfold sslmode=verify-full" -c "
+  SELECT s.id, s.title, s.creator, s.content
+  FROM shards s
+  JOIN labels l ON l.shard_id = s.id
+  JOIN labels sync ON sync.shard_id = s.id
+  WHERE s.project = 'PROJECT_NAME'
+    AND s.type = 'message'
+    AND s.status = 'open'
+    AND l.label IN ('to:AGENT_NAME', 'cc:AGENT_NAME')
+    AND sync.label = 'sync:true'
+    AND s.id NOT IN (SELECT shard_id FROM read_receipts WHERE agent_id = 'AGENT_NAME')
+  ORDER BY s.created_at;
+"
+```
+
+### 2. Process Each Message
+
+For each message:
+
+1. **Parse JSON frontmatter** to get `type`, `session`, `poll_hint`
+2. **Mark as read** immediately
+3. **Process based on type:**
+
+| Type | Action |
+|------|--------|
+| `bug` | Investigate, create task if needed, respond with fix/status |
+| `question` | Answer the question |
+| `request` | Fulfill request or explain why not |
+| `ack` | Acknowledge receipt, continue |
+
+### 3. Compose Response
+
+Structure your response with JSON frontmatter:
+
+```
+{
+  "poll_hint": "continue|done",
+  "type": "response|ack|resolution",
+  "session": "SAME_SESSION_ID"
+}
+
+## Response
+
+Your response here...
+
+-- AGENT_NAME
+```
+
+### 4. Send Response
+
+```sql
+SELECT send_message(
+  'PROJECT_NAME',
+  'AGENT_NAME',
+  ARRAY['ORIGINAL_SENDER'],
+  'Re: ORIGINAL_SUBJECT',
+  $body$RESPONSE_CONTENT$body$,
+  NULL,
+  NULL,
+  'PREFIX-ORIGINAL'  -- reply_to
+);
+```
+
+Add sync labels to response:
+```sql
+SELECT add_labels('PREFIX-REPLY', ARRAY['sync:true', 'sync:session-SESSION_ID']);
+```
+
+### 5. Poll Hints
+
+**When to use each:**
+
+| poll_hint | When to use |
+|-----------|-------------|
+| `continue` | You need more info, or waiting for confirmation |
+| `done` | Issue resolved, conversation complete |
+| `pause` | Need time to investigate (include `resume_in`) |
+| `typing` | Working on response, need more time |
+
+### 6. Continue Loop
+
+If your response has `poll_hint: continue`, keep listening for follow-ups.
+
+If you sent `poll_hint: done`, exit the listen loop.
+
+### 7. Timeout
+
+- **30 minutes**: Send warning message
+- **60 minutes**: Auto-send `poll_hint: done` and exit
+```
+
+Replace `PROJECT_NAME`, `AGENT_NAME`, and `PREFIX` with actual values in all three files.
+
+---
+
+## Step 6: Add Context-Palace Section to CLAUDE.md
 
 If CLAUDE.md doesn't exist, create it. If it exists, append to it.
 
@@ -243,7 +505,7 @@ Replace `AGENT_NAME`, `PROJECT_NAME`, and `PREFIX` with the actual values.
 
 ---
 
-## Step 6: Verify SSL Certificates
+## Step 7: Verify SSL Certificates
 
 Check if PostgreSQL SSL certificates exist:
 
@@ -261,7 +523,7 @@ If these files don't exist, warn the user:
 
 ---
 
-## Step 7: Test Connection
+## Step 8: Test Connection
 
 Test the database connection:
 
@@ -277,13 +539,13 @@ If successful, you'll see:
 ```
 
 If it fails, report the error to the user. Common issues:
-- SSL certs not installed (Step 6)
+- SSL certs not installed (Step 7)
 - Network/firewall blocking port 5432
 - Database server down
 
 ---
 
-## Step 8: Register Project (if new)
+## Step 9: Register Project (if new)
 
 Check if the project exists:
 
@@ -299,7 +561,7 @@ psql "host=dev02.brown.chat dbname=contextpalace user=penfold sslmode=verify-ful
 
 ---
 
-## Step 9: Confirm Setup
+## Step 10: Confirm Setup
 
 Report to the user:
 
@@ -308,15 +570,23 @@ Report to the user:
 > **Files created:**
 > - `context-palace.md` - Full reference guide
 > - `PREFIX-rules.md` - Project-specific rules (customize this!)
+> - `.claude/commands/mail-check.md` - Check inbox command
+> - `.claude/commands/mail-send-wait.md` - Send sync message command
+> - `.claude/commands/mail-listen.md` - Listen for sync messages command
 >
 > **Configuration:**
 > - Agent: **AGENT_NAME**
 > - Project: **PROJECT_NAME** (prefix: `PREFIX-`)
 > - Connection: Tested successfully
 >
+> **Available commands:**
+> - `/mail-check` - Check and process inbox
+> - `/mail-send-wait` - Send message and wait for reply
+> - `/mail-listen` - Listen for incoming sync messages
+>
 > **Next steps:**
 > 1. Review and customize `PREFIX-rules.md` for your project
-> 2. Check inbox: `SELECT * FROM unread_for('PROJECT_NAME', 'AGENT_NAME');`
+> 2. Run `/mail-check` to check your inbox
 > 3. Check tasks: `SELECT * FROM tasks_for('PROJECT_NAME', 'AGENT_NAME');`
 
 ---
