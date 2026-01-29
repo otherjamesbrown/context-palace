@@ -1,6 +1,16 @@
 # Context-Palace Agent Template
 
-## Setup Instructions
+## For Claude Code Instances
+
+**If you are a Claude Code instance** setting up Context-Palace for a project, read and follow `setup.md` instead. It has step-by-step instructions designed for you to execute.
+
+```bash
+curl -sL https://raw.githubusercontent.com/otherjamesbrown/context-palace/main/setup.md | head -100
+```
+
+---
+
+## Manual Setup Instructions (for humans)
 
 ### Step 1: Get Your Identity
 

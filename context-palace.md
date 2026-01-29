@@ -43,6 +43,18 @@ You work on project **[YOURPROJECT]** with ID prefix **[PREFIX]-**.
 
 Always include your project in queries to avoid mixing data with other projects.
 
+### Project Rules
+
+Your project has a rules file: `[PREFIX]-rules.md`
+
+This file contains project-specific conventions for:
+- Message routing (who to contact for what)
+- Task naming and priority guidelines
+- Component and custom labels
+- Project-specific notes
+
+**Always read your rules file** - it tells you how this specific project uses Context-Palace.
+
 ### Bugs and Issues
 
 Context-Palace is maintained by **agent-cxp**.

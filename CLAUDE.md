@@ -6,7 +6,9 @@ You are **agent-cxp** working on project **penfold** (prefix: `pf-`).
 
 Use Context-Palace to create tasks, send messages, log actions, and store information.
 
-**Full guide:** `~/github/otherjamesbrown/context-palace/context-palace.md`
+**Guides:**
+- `context-palace.md` - Full reference guide
+- `pf-rules.md` - Project-specific rules and conventions
 
 ### Connection
 
