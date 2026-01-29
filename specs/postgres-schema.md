@@ -668,3 +668,131 @@ ALTER TABLE shards ADD COLUMN search_vector tsvector
   GENERATED ALWAYS AS (to_tsvector('english', coalesce(title,'') || ' ' || coalesce(content,''))) STORED;
 CREATE INDEX idx_shards_search ON shards USING GIN(search_vector);
 ```
+
+## CLI Command Logging
+
+Separate table for high-volume CLI command logs. Not a shard - different access patterns and no workflow states.
+
+### cli_commands table
+
+```sql
+CREATE TABLE cli_commands (
+  id          BIGSERIAL PRIMARY KEY,
+  project     TEXT NOT NULL,
+  agent       TEXT NOT NULL,
+  command     TEXT NOT NULL,              -- Subcommand name (e.g., 'search', 'ingest')
+  args        TEXT[],                     -- Arguments as array
+  full_command TEXT NOT NULL,             -- Complete command for display
+  duration_ms INTEGER,                    -- Execution time in milliseconds
+  success     BOOLEAN NOT NULL DEFAULT true,
+  error_message TEXT,                     -- Error details (truncated to 500 chars)
+  response    TEXT,                       -- Output preview (truncated to 500 chars)
+  tenant_id   TEXT,                       -- Optional tenant context
+  hostname    TEXT,                       -- Machine that ran it
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Indexes for common queries
+CREATE INDEX idx_cli_commands_project ON cli_commands(project);
+CREATE INDEX idx_cli_commands_project_agent ON cli_commands(project, agent);
+CREATE INDEX idx_cli_commands_project_created ON cli_commands(project, created_at DESC);
+CREATE INDEX idx_cli_commands_command ON cli_commands(command);
+```
+
+### log_cli_command()
+
+Log a CLI command execution:
+
+```sql
+CREATE OR REPLACE FUNCTION log_cli_command(
+  p_project TEXT,
+  p_agent TEXT,
+  p_command TEXT,
+  p_args TEXT[],
+  p_full_command TEXT,
+  p_duration_ms INTEGER DEFAULT NULL,
+  p_success BOOLEAN DEFAULT true,
+  p_error_message TEXT DEFAULT NULL,
+  p_response TEXT DEFAULT NULL,
+  p_tenant_id TEXT DEFAULT NULL,
+  p_hostname TEXT DEFAULT NULL
+) RETURNS BIGINT AS $$
+DECLARE
+  new_id BIGINT;
+BEGIN
+  INSERT INTO cli_commands (
+    project, agent, command, args, full_command,
+    duration_ms, success, error_message, response, tenant_id, hostname
+  ) VALUES (
+    p_project, p_agent, p_command, p_args, p_full_command,
+    p_duration_ms, p_success,
+    LEFT(p_error_message, 500),  -- Truncate to 500 chars
+    LEFT(p_response, 500),       -- Truncate to 500 chars
+    p_tenant_id, p_hostname
+  ) RETURNING id INTO new_id;
+  RETURN new_id;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+### cli_history()
+
+Query recent CLI command history:
+
+```sql
+CREATE OR REPLACE FUNCTION cli_history(
+  p_project TEXT,
+  p_agent TEXT DEFAULT NULL,
+  p_limit INTEGER DEFAULT 20
+)
+RETURNS TABLE (
+  id BIGINT,
+  agent TEXT,
+  command TEXT,
+  full_command TEXT,
+  duration_ms INTEGER,
+  success BOOLEAN,
+  error_message TEXT,
+  created_at TIMESTAMPTZ
+) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    c.id, c.agent, c.command, c.full_command,
+    c.duration_ms, c.success, c.error_message, c.created_at
+  FROM cli_commands c
+  WHERE c.project = p_project
+    AND (p_agent IS NULL OR c.agent = p_agent)
+  ORDER BY c.created_at DESC
+  LIMIT p_limit;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+### Usage
+
+```sql
+-- Log a command
+SELECT log_cli_command(
+  'penfold',
+  'agent-penfdev',
+  'search',
+  ARRAY['kubernetes', 'pods'],
+  'penf search kubernetes pods',
+  1250,
+  true,
+  NULL,
+  'Found 15 results...',
+  NULL,
+  'dev01'
+);
+
+-- View recent history (all agents)
+SELECT * FROM cli_history('penfold');
+
+-- View history for specific agent
+SELECT * FROM cli_history('penfold', 'agent-penfdev');
+
+-- View more history
+SELECT * FROM cli_history('penfold', NULL, 50);
+```
