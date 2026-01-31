@@ -54,7 +54,7 @@ SELECT * FROM get_thread('PREFIX-xxx');
 | `tasks` table | `shards` table | Use `shards WHERE type='task'` or the `tasks` view |
 | `messages` table | `shards` table | Use `shards WHERE type='message'` or the `messages` view |
 
-**Convenience views exist:** `issues`, `tasks`, `messages`, `logs`, `docs` - these filter `shards` by type.
+**Convenience views exist:** `issues`, `tasks`, `messages`, `logs`, `docs`, `memories`, `sessions`, `backlog` - these filter `shards` by type.
 
 ---
 
@@ -75,6 +75,7 @@ SELECT * FROM get_thread('PREFIX-xxx');
 | created_at | timestamptz | When created |
 | closed_at | timestamptz | When closed |
 | closed_reason | text | Why closed |
+| expires_at | timestamptz | Optional expiry (for memories) |
 
 ### Other tables
 | Table | Purpose |
@@ -105,6 +106,17 @@ SELECT * FROM get_thread('PREFIX-xxx');
 | `mark_all_read(project, agent)` | Clear inbox |
 | `link(from, to, type)` | Create edge |
 | `add_labels(shard_id, labels[])` | Add multiple labels |
+| `memories_for(project, agent)` | Get active memories for agent |
+| `expired_memories(project)` | Get memories past expiry |
+| `create_memory(project, owner, title, trigger, context_id, expires_at)` | Create memory with optional trigger edge |
+| `close_memory(memory_id, resolution)` | Close a triggered memory |
+| `current_session(project, agent)` | Get most recent open session |
+| `start_session(project, owner, title)` | Start a new session |
+| `add_checkpoint(session_id, summary)` | Add checkpoint to session |
+| `end_session(session_id, summary)` | Close session with optional summary |
+| `close_stale_sessions(project, interval)` | Auto-close inactive sessions (default 24h) |
+| `backlog_for(project, agent)` | Get open backlog items for agent |
+| `create_backlog_item(project, owner, title, content, priority, depends_on[])` | Create backlog item with dependencies |
 
 ---
 
@@ -305,7 +317,10 @@ This auto-links to source, copies labels, and closes the source message.
 | `relates-to` | Loose association |
 | `discovered-from` | Created from source |
 | `blocks` | Dependency |
+| `blocked-by` | Blocked by dependency |
 | `has-artifact` | Work artifact (commit, URL, etc.) - metadata contains details |
+| `triggered-by` | Memory triggered by context |
+| `depends-on` | Backlog item dependency |
 
 ---
 
@@ -363,6 +378,72 @@ SELECT add_labels('PREFIX-NEWID', ARRAY['sync:true', 'sync:session-123']);
 4. CLAIM/WORK      claim_task() then do the work
 5. COMPLETE        close_task() with summary
 6. REPEAT
+```
+
+---
+
+## Memory, Session & Backlog
+
+### Memories
+
+Memories are things to remember across sessions - reminders, pending actions, context.
+
+```sql
+-- Create a memory with trigger condition
+SELECT create_memory('PROJECT', 'agent-NAME',
+  'Delete test data when content delete available',
+  'content delete implemented',  -- trigger condition
+  'PREFIX-context-id',           -- optional context
+  NOW() + INTERVAL '7 days'      -- optional expiry
+);
+
+-- Check your memories
+SELECT * FROM memories_for('PROJECT', 'agent-NAME');
+
+-- Close a memory when triggered
+SELECT close_memory('PREFIX-xxx', 'Done: deleted test data');
+
+-- Find expired memories (for cleanup)
+SELECT * FROM expired_memories('PROJECT');
+```
+
+### Sessions
+
+Sessions track work with checkpoints.
+
+```sql
+-- Start a session
+SELECT start_session('PROJECT', 'agent-NAME', 'Working on feature X');
+
+-- Add checkpoints as you work
+SELECT add_checkpoint('PREFIX-session-id', 'Completed auth module');
+SELECT add_checkpoint('PREFIX-session-id', 'Fixed TLS bugs');
+
+-- Get current session
+SELECT * FROM current_session('PROJECT', 'agent-NAME');
+
+-- End session
+SELECT end_session('PREFIX-session-id', 'Feature X complete');
+
+-- Auto-close stale sessions (run periodically)
+SELECT close_stale_sessions('PROJECT', '24 hours');
+```
+
+### Backlog
+
+Backlog items are development work items with dependencies.
+
+```sql
+-- Create backlog item
+SELECT create_backlog_item('PROJECT', 'agent-NAME',
+  'Implement caching layer',
+  'Add Redis caching for API responses',
+  2,                              -- priority
+  ARRAY['PREFIX-dependency-id']   -- depends on
+);
+
+-- Get your backlog
+SELECT * FROM backlog_for('PROJECT', 'agent-NAME');
 ```
 
 ---

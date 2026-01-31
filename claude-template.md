@@ -107,6 +107,13 @@ SELECT close_task('[PREFIX]-xxx', 'Completed: summary');
 
 -- Add artifact to task
 SELECT add_artifact('[PREFIX]-xxx', 'commit', 'abc123', 'Fixed the bug');
+
+-- Memory/Session/Backlog
+SELECT * FROM memories_for('[YOURPROJECT]', '[agent-YOURNAME]');
+SELECT * FROM current_session('[YOURPROJECT]', '[agent-YOURNAME]');
+SELECT * FROM backlog_for('[YOURPROJECT]', '[agent-YOURNAME]');
+SELECT start_session('[YOURPROJECT]', '[agent-YOURNAME]', 'Session title');
+SELECT add_checkpoint('[PREFIX]-session', 'Progress summary');
 ```
 
 ## Common Mistakes
@@ -178,6 +185,13 @@ SELECT close_task('pf-xxx', 'Completed: summary');
 
 -- Add artifact to task
 SELECT add_artifact('pf-xxx', 'commit', 'abc123', 'Fixed the bug');
+
+-- Memory/Session/Backlog
+SELECT * FROM memories_for('penfold', 'agent-cli');
+SELECT * FROM current_session('penfold', 'agent-cli');
+SELECT * FROM backlog_for('penfold', 'agent-cli');
+SELECT start_session('penfold', 'agent-cli', 'Session title');
+SELECT add_checkpoint('pf-session', 'Progress summary');
 ```
 
 ## Common Mistakes
