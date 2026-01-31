@@ -79,7 +79,37 @@ func (c *Config) ConnectionString() string {
 var rootCmd = &cobra.Command{
 	Use:   "palace",
 	Short: "Context-Palace CLI for sub-agents",
-	Long:  `A simplified CLI for sub-agents to interact with context-palace tasks and artifacts.`,
+	Long: `A simplified CLI for sub-agents to interact with context-palace tasks and artifacts.
+
+COMMANDS:
+  task get <id>                      Get task details
+  task claim <id>                    Claim a task (sets you as owner)
+  task progress <id> "note"          Log progress on a task
+  task close <id> "summary"          Close a task with summary
+  artifact add <id> <type> <ref> "desc"   Add artifact to a task
+
+CONFIGURATION:
+  Environment variables (override config file):
+    PALACE_USER     Database user (required)
+    PALACE_AGENT    Your agent name (required)
+    PALACE_HOST     Database host (default: dev02.brown.chat)
+    PALACE_DB       Database name (default: contextpalace)
+    PALACE_PROJECT  Project name (default: penfold)
+
+  Config file (~/.palace.yaml):
+    host: dev02.brown.chat
+    database: contextpalace
+    user: penfold
+    project: penfold
+    agent: agent-myname
+
+EXAMPLES:
+  palace task get pf-123
+  palace task claim pf-123
+  palace task progress pf-123 "Found bug in auth.go"
+  palace artifact add pf-123 commit abc123 "Fixed the bug"
+  palace task close pf-123 "Fixed OAuth token refresh"
+  palace --json task get pf-123`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		var err error
 		cfg, err = LoadConfig()
@@ -94,6 +124,17 @@ func Execute() error {
 	return rootCmd.Execute()
 }
 
+var Version = "0.1.0"
+
+var versionCmd = &cobra.Command{
+	Use:   "version",
+	Short: "Print version information",
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Printf("palace version %s\n", Version)
+	},
+}
+
 func init() {
 	rootCmd.PersistentFlags().BoolVar(&jsonOutput, "json", false, "Output in JSON format")
+	rootCmd.AddCommand(versionCmd)
 }
