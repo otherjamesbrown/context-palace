@@ -128,6 +128,25 @@ psql "host=dev02.brown.chat dbname=contextpalace user=penfold sslmode=verify-ful
 
 SSL certificates in `~/.postgresql/` provide authentication.
 
+### Handling Complex Content
+
+For content with backticks, quotes, or special characters, use heredoc + PostgreSQL dollar-quoting:
+
+```bash
+psql "host=dev02.brown.chat dbname=contextpalace user=penfold sslmode=verify-full" <<'EOSQL'
+SELECT create_shard('penfold', 'Title', $md$
+Content with `backticks` and 'quotes' - no escaping needed.
+
+```code
+Even code blocks work fine.
+```
+$md$, 'task', 'agent-NAME');
+EOSQL
+```
+
+- `<<'EOSQL'` (single quotes) prevents shell from expanding anything
+- `$md$...$md$` is PostgreSQL dollar-quoting - no SQL escaping needed inside
+
 ---
 
 ## Agent Identity
