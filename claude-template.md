@@ -56,94 +56,68 @@ psql "host=dev02.brown.chat dbname=contextpalace user=penfold sslmode=verify-ful
 ## Template (copy from here)
 
 ```markdown
-## Context-Palace
+# Context-Palace
+
+## My Identity
 
 You are **[agent-YOURNAME]** working on project **[YOURPROJECT]** (prefix: `[PREFIX]-`).
 
-Context-Palace is your shared memory system. Use it to:
-- Create and track tasks/bugs
-- Send messages to other agents and humans
-- Log your actions
-- Store information that needs to persist
+## Context-Palace (Support System)
 
-**Full guide:** Read `context-palace.md` in this folder.
+Context-Palace is your **support system** for:
+- Raising issues and reporting bugs
+- Creating and tracking work items
+- Sending messages to other agents
+- Logging actions and storing information
 
-### Connection
+It assists your work - it is not your primary task.
 
+**Reference docs:**
+- `context-palace.md` - Full usage guide (Quick Reference at top, Common Mistakes section)
+- `[PREFIX]-rules` - Project rules: `SELECT content FROM shards WHERE id = '[PREFIX]-rules';`
+
+**Connection:**
 ```bash
 psql "host=dev02.brown.chat dbname=contextpalace user=penfold sslmode=verify-full" -c "SQL"
 ```
 
-### Start of Session
-
-Always check for messages and tasks at the start of a session:
+## Quick Commands
 
 ```sql
--- Check inbox
+-- Check inbox and tasks
 SELECT * FROM unread_for('[YOURPROJECT]', '[agent-YOURNAME]');
-
--- Check your tasks
+SELECT * FROM inbox_summary('[YOURPROJECT]', '[agent-YOURNAME]');
 SELECT * FROM tasks_for('[YOURPROJECT]', '[agent-YOURNAME]');
 
--- See ready tasks anyone can claim
-SELECT * FROM ready_tasks('[YOURPROJECT]');
-```
-
-### Quick Commands
-
-```sql
--- Mark message read
-INSERT INTO read_receipts (shard_id, agent_id) VALUES ('[PREFIX]-xxx', '[agent-YOURNAME]') ON CONFLICT DO NOTHING;
-
--- Create task (simple)
-SELECT create_shard('[YOURPROJECT]', 'Title', 'Details', 'task', '[agent-YOURNAME]');
--- Returns: [PREFIX]-a1b2c3
-
--- Create task with owner and priority
-SELECT create_shard('[YOURPROJECT]', 'Title', 'Details', 'task', '[agent-YOURNAME]', 'target-agent', 2);
-
 -- Send message
-SELECT create_shard('[YOURPROJECT]', 'Subject', 'Body', 'message', '[agent-YOURNAME]');
-INSERT INTO labels (shard_id, label) VALUES ('[PREFIX]-NEWID', 'to:recipient');
+SELECT send_message('[YOURPROJECT]', '[agent-YOURNAME]', ARRAY['recipient'], 'Subject', 'Body');
 
 -- Reply to message
-SELECT create_shard('[YOURPROJECT]', 'Re: Subject', 'Reply text', 'message', '[agent-YOURNAME]');
-INSERT INTO edges (from_id, to_id, edge_type) VALUES ('[PREFIX]-REPLY', '[PREFIX]-ORIGINAL', 'replies-to');
-INSERT INTO labels (shard_id, label) VALUES ('[PREFIX]-REPLY', 'to:original-sender');
+SELECT send_message('[YOURPROJECT]', '[agent-YOURNAME]', ARRAY['sender'], 'Re: Subject', 'Body', NULL, NULL, '[PREFIX]-original');
 
--- Claim task
-UPDATE shards SET owner = '[agent-YOURNAME]', status = 'in_progress' WHERE id = '[PREFIX]-xxx' AND owner IS NULL;
+-- Mark read
+SELECT mark_read(ARRAY['[PREFIX]-xxx'], '[agent-YOURNAME]');
 
--- Close task
-UPDATE shards SET status = 'closed', closed_at = NOW(), closed_reason = 'Done: summary' WHERE id = '[PREFIX]-xxx';
+-- Create task
+SELECT create_shard('[YOURPROJECT]', 'Title', 'Description', 'task', '[agent-YOURNAME]');
 
--- Log an action
-SELECT create_shard('[YOURPROJECT]', 'Did something', 'Details of action', 'log', '[agent-YOURNAME]');
+-- Claim and close tasks
+SELECT claim_task('[PREFIX]-xxx', '[agent-YOURNAME]');
+SELECT close_task('[PREFIX]-xxx', 'Completed: summary');
 
--- Get conversation thread
-SELECT * FROM get_thread('[PREFIX]-xxx');
-
--- Search
-SELECT id, title, status FROM shards, to_tsquery('english', 'keyword') query
-WHERE project = '[YOURPROJECT]' AND search_vector @@ query ORDER BY ts_rank(search_vector, query) DESC LIMIT 10;
+-- Add artifact to task
+SELECT add_artifact('[PREFIX]-xxx', 'commit', 'abc123', 'Fixed the bug');
 ```
 
-### Priorities
+## Common Mistakes
 
-| Priority | Meaning |
-|----------|---------|
-| 0 | Critical - drop everything |
-| 1 | High - do today |
-| 2 | Normal - this week |
-| 3 | Low - when possible |
+| Wrong | Correct |
+|-------|---------|
+| `body` | `content` |
+| `shard_type` | `type` |
+| `issues` table | `shards` or `issues` view |
 
-### Message Labels
-
-- `to:agent-xxx` - Send to agent
-- `to:human-xxx` - Send to human
-- `kind:bug-report` - Bug report
-- `kind:status-update` - FYI / progress
-- `kind:question` - Needs response
+See `context-palace.md` for full schema and function reference.
 ```
 
 ---
@@ -153,62 +127,68 @@ WHERE project = '[YOURPROJECT]' AND search_vector @@ query ORDER BY ts_rank(sear
 After replacement, CLAUDE.md would look like:
 
 ```markdown
-## Context-Palace
+# Context-Palace
+
+## My Identity
 
 You are **agent-cli** working on project **penfold** (prefix: `pf-`).
 
-Context-Palace is your shared memory system. Use it to:
-- Create and track tasks/bugs
-- Send messages to other agents and humans
-- Log your actions
-- Store information that needs to persist
+## Context-Palace (Support System)
 
-**Full guide:** Read `context-palace.md` in this folder.
+Context-Palace is your **support system** for:
+- Raising issues and reporting bugs
+- Creating and tracking work items
+- Sending messages to other agents
+- Logging actions and storing information
 
-### Connection
+It assists your work - it is not your primary task.
 
+**Reference docs:**
+- `context-palace.md` - Full usage guide (Quick Reference at top, Common Mistakes section)
+- `pf-rules` - Project rules: `SELECT content FROM shards WHERE id = 'pf-rules';`
+
+**Connection:**
 ```bash
 psql "host=dev02.brown.chat dbname=contextpalace user=penfold sslmode=verify-full" -c "SQL"
 ```
 
-### Start of Session
-
-Always check for messages and tasks at the start of a session:
+## Quick Commands
 
 ```sql
--- Check inbox
+-- Check inbox and tasks
 SELECT * FROM unread_for('penfold', 'agent-cli');
-
--- Check your tasks
+SELECT * FROM inbox_summary('penfold', 'agent-cli');
 SELECT * FROM tasks_for('penfold', 'agent-cli');
 
--- See ready tasks anyone can claim
-SELECT * FROM ready_tasks('penfold');
-```
-
-### Quick Commands
-
-```sql
--- Mark message read
-INSERT INTO read_receipts (shard_id, agent_id) VALUES ('pf-xxx', 'agent-cli') ON CONFLICT DO NOTHING;
-
--- Create task (simple)
-SELECT create_shard('penfold', 'Title', 'Details', 'task', 'agent-cli');
--- Returns: pf-a1b2c3
-
--- Create task with owner and priority
-SELECT create_shard('penfold', 'Title', 'Details', 'task', 'agent-cli', 'target-agent', 2);
-
 -- Send message
-SELECT create_shard('penfold', 'Subject', 'Body', 'message', 'agent-cli');
-INSERT INTO labels (shard_id, label) VALUES ('pf-NEWID', 'to:recipient');
+SELECT send_message('penfold', 'agent-cli', ARRAY['recipient'], 'Subject', 'Body');
 
--- Claim task
-UPDATE shards SET owner = 'agent-cli', status = 'in_progress' WHERE id = 'pf-xxx' AND owner IS NULL;
+-- Reply to message
+SELECT send_message('penfold', 'agent-cli', ARRAY['sender'], 'Re: Subject', 'Body', NULL, NULL, 'pf-original');
 
--- Close task
-UPDATE shards SET status = 'closed', closed_at = NOW(), closed_reason = 'Done: summary' WHERE id = 'pf-xxx';
+-- Mark read
+SELECT mark_read(ARRAY['pf-xxx'], 'agent-cli');
+
+-- Create task
+SELECT create_shard('penfold', 'Title', 'Description', 'task', 'agent-cli');
+
+-- Claim and close tasks
+SELECT claim_task('pf-xxx', 'agent-cli');
+SELECT close_task('pf-xxx', 'Completed: summary');
+
+-- Add artifact to task
+SELECT add_artifact('pf-xxx', 'commit', 'abc123', 'Fixed the bug');
 ```
+
+## Common Mistakes
+
+| Wrong | Correct |
+|-------|---------|
+| `body` | `content` |
+| `shard_type` | `type` |
+| `issues` table | `shards` or `issues` view |
+
+See `context-palace.md` for full schema and function reference.
 ```
 
 ---
