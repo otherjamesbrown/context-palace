@@ -1,0 +1,6 @@
+# Context-Palace agent configuration
+# Copy to .palace.yaml in your working directory
+
+project: penfold
+agent: agent-yourname
+prefix: pf

@@ -193,3 +193,30 @@ Error: failed to connect to database: check your configuration and network
 | Add artifacts | Inbox management |
 
 Palace is for **sub-agents** doing focused task work. Orchestrators use **psql** for full access.
+
+---
+
+## Syncing Documentation
+
+Use `palace-sync-docs` to fetch the latest context-palace.md with your values filled in:
+
+```bash
+# Create config in your working directory
+cat > .palace.yaml << 'EOF'
+project: penfold
+agent: agent-yourname
+prefix: pf
+EOF
+
+# Fetch and personalize docs
+palace-sync-docs
+
+# Preview changes without writing
+palace-sync-docs --check
+```
+
+This script:
+1. Reads `.palace.yaml` from current directory
+2. Fetches latest `context-palace.md` from the repo
+3. Replaces template values (PROJECT, agent-NAME, PREFIX-) with your values
+4. Writes personalized `context-palace.md` to current directory

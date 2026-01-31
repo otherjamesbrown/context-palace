@@ -76,6 +76,17 @@ SELECT * FROM get_thread('PREFIX-xxx');
 | closed_at | timestamptz | When closed |
 | closed_reason | text | Why closed |
 | expires_at | timestamptz | Optional expiry (for memories) |
+| labels | text[] | Tags like `agent:cli-dev` |
+
+### file_claims table
+| Column | Type | Notes |
+|--------|------|-------|
+| file_path | text | Primary key - the file being claimed |
+| shard_id | text | FK to shards - the task claiming it |
+| session_id | text | Claude session ID |
+| agent_id | text | Agent holding the claim |
+| claimed_at | timestamptz | When claimed |
+| expires_at | timestamptz | Auto-expires (default 1 hour) |
 
 ### Other tables
 | Table | Purpose |
@@ -117,6 +128,13 @@ SELECT * FROM get_thread('PREFIX-xxx');
 | `close_stale_sessions(project, interval)` | Auto-close inactive sessions (default 24h) |
 | `backlog_for(project, agent)` | Get open backlog items for agent |
 | `create_backlog_item(project, owner, title, content, priority, depends_on[])` | Create backlog item with dependencies |
+| `claim_files(shard_id, session_id, agent_id, files[])` | Atomically claim files for parallel work |
+| `release_claims(shard_id)` | Release all file claims for a shard |
+| `check_conflicts(files[], my_shard_id)` | Find files claimed by other shards |
+| `cleanup_expired_claims()` | Remove expired file claims |
+| `extend_claims(shard_id, duration)` | Extend claim expiry (default 1 hour) |
+| `create_impl_shard(project, creator, agent_type, title, content, files[], depends_on[], parent_id)` | Create implementation shard with labels, dependencies, and file claims |
+| `impl_status(parent_id)` | View all child implementation shards with status |
 
 ---
 
@@ -151,9 +169,29 @@ EOSQL
 
 ## Agent Identity
 
-You are **[agent-YOURNAME]** working on project **[YOURPROJECT]** with prefix **[PREFIX]-**.
+You are **agent-NAME** working on project **PROJECT** with prefix **PREFIX-**.
 
-Your project rules are in `[PREFIX]-rules` (fetch with `SELECT content FROM shards WHERE id = '[PREFIX]-rules'`).
+Your project rules are in `PREFIX-rules` (fetch with `SELECT content FROM shards WHERE id = 'PREFIX-rules'`).
+
+---
+
+## Syncing This File
+
+To get the latest version with your values filled in:
+
+```bash
+# Create .palace.yaml in your working directory
+cat > .palace.yaml << 'EOF'
+project: yourproject
+agent: agent-yourname
+prefix: xx
+EOF
+
+# Run sync script
+palace-sync-docs
+```
+
+This fetches the latest documentation and replaces template values.
 
 ---
 
@@ -326,6 +364,9 @@ This auto-links to source, copies labels, and closes the source message.
 ### Components
 - `backend`, `frontend`, `database`, `infra`
 
+### Agent Types (for implementation shards)
+- `agent:cli-dev`, `agent:service-dev`, `agent:worker-dev`, `agent:data-dev`, `agent:ai-dev`
+
 ---
 
 ## Edge Types
@@ -464,6 +505,57 @@ SELECT create_backlog_item('PROJECT', 'agent-NAME',
 -- Get your backlog
 SELECT * FROM backlog_for('PROJECT', 'agent-NAME');
 ```
+
+### File Claims (Multi-Agent Coordination)
+
+Prevent conflicts when multiple agents work in parallel:
+
+```sql
+-- Claim files before editing
+SELECT claim_files('PREFIX-task', 'session-123', 'agent-NAME',
+  ARRAY['cmd/app/main.go', 'pkg/service/handler.go']);
+
+-- Check if files are available
+SELECT * FROM check_conflicts(
+  ARRAY['pkg/service/handler.go', 'pkg/service/new.go'],
+  'PREFIX-my-task'
+);
+
+-- Extend claims for long-running work
+SELECT extend_claims('PREFIX-task', interval '2 hours');
+
+-- Release when done (auto-called by close_task)
+SELECT release_claims('PREFIX-task');
+
+-- Cleanup expired claims
+SELECT cleanup_expired_claims();
+```
+
+Claims auto-expire after 1 hour and are auto-released when `close_task()` is called.
+
+### Implementation Workflow
+
+Create coordinated implementation shards with dependencies:
+
+```sql
+-- Create implementation shard with file claims and dependencies
+SELECT create_impl_shard(
+  'PROJECT',
+  'agent-NAME',
+  'cli-dev',                          -- agent_type label
+  'Implement pipeline command',
+  'Task description...',
+  ARRAY['cmd/app/pipeline.go'],       -- files to claim
+  ARRAY['PREFIX-schema-task'],        -- blocked by these
+  'PREFIX-parent-feature'             -- parent shard
+);
+
+-- Check implementation progress
+SELECT * FROM impl_status('PREFIX-parent-feature');
+-- Returns: id, title, status, owner, agent_type, blocked_by[], files[]
+```
+
+Agent types: `cli-dev`, `service-dev`, `worker-dev`, `data-dev`, `ai-dev`
 
 ---
 
