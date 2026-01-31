@@ -116,6 +116,20 @@ SELECT start_session('[YOURPROJECT]', '[agent-YOURNAME]', 'Session title');
 SELECT add_checkpoint('[PREFIX]-session', 'Progress summary');
 ```
 
+## Palace CLI (for Sub-Agents)
+
+Sub-agents can use `palace` CLI instead of SQL:
+```bash
+export PALACE_USER=penfold PALACE_AGENT=[agent-YOURNAME]
+palace task get [PREFIX]-xxx
+palace task claim [PREFIX]-xxx
+palace task progress [PREFIX]-xxx "note"
+palace task close [PREFIX]-xxx "summary"
+palace artifact add [PREFIX]-xxx commit abc123 "description"
+```
+
+See `palace-cli.md` for full documentation.
+
 ## Common Mistakes
 
 | Wrong | Correct |
@@ -193,6 +207,20 @@ SELECT * FROM backlog_for('penfold', 'agent-cli');
 SELECT start_session('penfold', 'agent-cli', 'Session title');
 SELECT add_checkpoint('pf-session', 'Progress summary');
 ```
+
+## Palace CLI (for Sub-Agents)
+
+Sub-agents can use `palace` CLI instead of SQL:
+```bash
+export PALACE_USER=penfold PALACE_AGENT=agent-cli
+palace task get pf-xxx
+palace task claim pf-xxx
+palace task progress pf-xxx "note"
+palace task close pf-xxx "summary"
+palace artifact add pf-xxx commit abc123 "description"
+```
+
+See `palace-cli.md` for full documentation.
 
 ## Common Mistakes
 

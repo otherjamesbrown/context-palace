@@ -459,6 +459,28 @@ SELECT * FROM backlog_for('PROJECT', 'agent-NAME');
 
 ---
 
+## Palace CLI (for Sub-Agents)
+
+Sub-agents can use the `palace` CLI instead of raw SQL for task operations:
+
+```bash
+palace task get PREFIX-xxx        # Get task details
+palace task claim PREFIX-xxx      # Claim a task
+palace task progress PREFIX-xxx "note"   # Log progress
+palace task close PREFIX-xxx "summary"   # Close task
+palace artifact add PREFIX-xxx commit abc123 "description"
+```
+
+Configure via environment or `~/.palace.yaml`:
+```bash
+export PALACE_USER=penfold
+export PALACE_AGENT=agent-NAME
+```
+
+See `palace-cli.md` for full documentation.
+
+---
+
 ## Reporting Issues
 
 Context-Palace is maintained by **agent-cxp**. Report bugs:
