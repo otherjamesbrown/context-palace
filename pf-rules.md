@@ -9,18 +9,37 @@
   - **agent-penfold** - Development agent
   - **agent-cxp** - Context-Palace maintainer
 
-## Message Routing
+## Messaging
 
-### Who to contact for what
+### Use the penf CLI for messages
 
-| Topic | Send to | Labels |
-|-------|---------|--------|
-| Penfold feature requests | mycroft | `kind:feature` |
-| Penfold bugs | mycroft | `kind:bug-report` |
-| Context-Palace issues | cxp | `kind:bug-report` |
-| Infrastructure issues | cxp | `kind:bug-report`, `infra` |
+**Always use the CLI** - never raw SQL INSERTs for messages:
 
-Note: Agent names auto-expand (`mycroft` → `agent-mycroft`)
+```bash
+# Send a message
+penf message send mycroft "Subject line" --body "Message content"
+
+# Check inbox
+penf message inbox
+penf message inbox --unread
+
+# Read a message
+penf message show pf-xxx
+
+# Reply to a message
+penf message reply pf-xxx --body "Reply content"
+```
+
+The CLI ensures proper labels and conventions. Raw INSERTs will cause messages to get lost.
+
+### Who to contact
+
+| Topic | Send to |
+|-------|---------|
+| Penfold feature requests | mycroft |
+| Penfold bugs | mycroft |
+| Context-Palace issues | cxp |
+| Infrastructure issues | cxp |
 
 ## Message → Task Workflow
 
@@ -30,44 +49,20 @@ Messages are for communication. Tasks are for trackable work.
 
 1. **Read and acknowledge** the message
 2. **Discuss with user** if clarification needed
-3. **Create task(s)** linked to the message:
-   ```sql
-   SELECT create_shard('penfold', 'feat: description', 'Details...',
-     'task', 'mycroft', NULL, 2);
-   -- Or with parent_id for linking:
-   INSERT INTO shards (project, type, title, content, parent_id, creator, priority)
-   VALUES ('penfold', 'task', 'feat: description', 'Details...',
-           'pf-original-msg-id', 'agent-mycroft', 2)
-   RETURNING id;
-   ```
-4. **Claim the task** with claim_task()
+3. **Create task(s)** linked to the message
+4. **Claim the task** with `penf task claim pf-xxx`
 5. **Work the task** and close when done
 6. **Reply to original message** to confirm completion
-
-### Key Points
-
-- `claim_task()` only works on type='task', not type='message'
-- Task's `parent_id` links back to originating message
-- Multiple tasks can reference same parent message
 
 ## File Claims (Multi-Agent Coordination)
 
 When multiple Claude sessions work in parallel, use file_claims to prevent conflicts.
 
-### Before starting work on a shard:
-
-```sql
-SELECT claim_files('pf-xxx', 'session-id', 'mycroft',
-  ARRAY['file1.go', 'file2.go']);
-```
-
-### Check for conflicts before planning work:
-
-```sql
+```bash
+# Or via SQL:
+SELECT claim_files('pf-xxx', 'session-id', 'mycroft', ARRAY['file1.go', 'file2.go']);
 SELECT * FROM check_conflicts(ARRAY['file1.go'], 'my-shard-id');
 ```
-
-### When shard is closed:
 
 Claims are automatically released by close_task().
 
@@ -76,11 +71,10 @@ Claims are automatically released by close_task().
 - Claim files BEFORE reading or writing
 - If claim fails, STOP and report conflict
 - Claims expire after 1 hour (extend if needed)
-- Sub-agents inherit parent shard's claims
 
 ## Task Conventions
 
-### Priority Guidelines
+### Priority
 
 | Priority | Use for |
 |----------|---------|
@@ -89,57 +83,30 @@ Claims are automatically released by close_task().
 | 2 (Normal) | Standard features and fixes |
 | 3 (Low) | Nice-to-haves, cleanup |
 
-### Task Naming
+### Naming
 
 - Bug fixes: `fix: description`
 - Features: `feat: description`
 - Refactoring: `refactor: description`
 - Documentation: `docs: description`
 
-## Label Conventions
+## Session Start Checklist
 
-### Component Labels
+```bash
+# 1. Check inbox
+penf message inbox --unread
+
+# 2. Check tasks
+penf task list
+
+# 3. Process messages before starting new work
+# 4. Check file_claims for conflicts
+```
+
+## Component Labels
 
 - `cli` - CLI commands (cmd/penf/)
 - `gateway` - Gateway service
 - `worker` - Worker service
-- `proto` - Protobuf definitions
-- `database` - Schema, migrations, queries
+- `database` - Schema, migrations
 - `infra` - Infrastructure, deployment
-- `docs` - Documentation
-
-### Custom Labels
-
-- `context-palace` - Related to Context-Palace itself
-- `agent-comms` - Agent communication features
-
-## Session Start Checklist
-
-When starting a session:
-1. Check inbox: `SELECT * FROM unread_for('penfold', 'YOURNAME');`
-2. Check tasks: `SELECT * FROM tasks_for('penfold', 'YOURNAME');`
-3. Process messages before starting new work
-4. Check file_claims for any conflicts with planned work
-
-## Parallel Work Guidelines
-
-### Safe to parallelize:
-- Features touching different files
-- CLI vs Gateway vs Worker (different domains)
-- Features with no dependencies
-
-### Requires coordination:
-- Proto changes (affects generated code everywhere)
-- Shared utilities
-- Database migrations
-
-### Use /implement for orchestration:
-- Analyzes dependencies
-- Claims files before launching sub-agents
-- Groups work for parallel execution
-
-## Project-Specific Notes
-
-- This is the Context-Palace project itself - be careful about changes
-- agent-cxp is the maintainer for Context-Palace bugs/issues
-- Test database changes locally before applying to production
