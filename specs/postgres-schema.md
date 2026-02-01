@@ -775,7 +775,7 @@ $$ LANGUAGE plpgsql;
 -- Log a command
 SELECT log_cli_command(
   'penfold',
-  'agent-penfdev',
+  'mycroft',  -- shorthand works, expands to agent-mycroft
   'search',
   ARRAY['kubernetes', 'pods'],
   'penf search kubernetes pods',
@@ -791,7 +791,7 @@ SELECT log_cli_command(
 SELECT * FROM cli_history('penfold');
 
 -- View history for specific agent
-SELECT * FROM cli_history('penfold', 'agent-penfdev');
+SELECT * FROM cli_history('penfold', 'mycroft');
 
 -- View more history
 SELECT * FROM cli_history('penfold', NULL, 50);
