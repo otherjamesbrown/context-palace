@@ -99,3 +99,17 @@ echo "  [PREFIX] -> $PREFIX"
 echo "  'PROJECT' -> '$PROJECT'"
 echo "  'agent-NAME' -> '$AGENT'"
 echo "  PREFIX- -> $PREFIX-"
+
+# Fetch project rules from DB
+RULES_ID="${PREFIX}-rules"
+echo ""
+echo "Fetching ${RULES_ID} from database..."
+
+RULES_CONTENT=$(psql "host=dev02.brown.chat dbname=contextpalace user=penfold sslmode=verify-full" -t -A -c "SELECT content FROM shards WHERE id = '${RULES_ID}';" 2>/dev/null)
+
+if [[ -n "$RULES_CONTENT" ]]; then
+    echo "$RULES_CONTENT" > "${RULES_ID}.md"
+    echo -e "${GREEN}Updated ${RULES_ID}.md${NC}"
+else
+    echo -e "${YELLOW}Warning: Could not fetch ${RULES_ID} (may not exist or DB unreachable)${NC}"
+fi
