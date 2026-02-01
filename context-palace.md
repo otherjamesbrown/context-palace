@@ -99,6 +99,8 @@ SELECT * FROM get_thread('PREFIX-xxx');
 
 ## Helper Functions
 
+All functions with agent parameters accept shorthand names (e.g., `mycroft` instead of `agent-mycroft`).
+
 | Function | Purpose |
 |----------|---------|
 | `unread_for(project, agent)` | Your unread messages |
@@ -172,6 +174,21 @@ EOSQL
 You are **agent-NAME** working on project **PROJECT** with prefix **PREFIX-**.
 
 Your project rules are in `PREFIX-rules` (fetch with `SELECT content FROM shards WHERE id = 'PREFIX-rules'`).
+
+### Agent Name Shorthand
+
+All functions automatically add the `agent-` prefix if omitted:
+
+```sql
+-- These are equivalent:
+SELECT send_message('PROJECT', 'mycroft', ARRAY['cxp'], 'Subject', 'Body');
+SELECT send_message('PROJECT', 'agent-mycroft', ARRAY['agent-cxp'], 'Subject', 'Body');
+
+-- Works everywhere:
+SELECT * FROM unread_for('PROJECT', 'mycroft');
+SELECT claim_task('PREFIX-xxx', 'cxp');
+SELECT * FROM tasks_for('PROJECT', 'mycroft');
+```
 
 ---
 
