@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/otherjamesbrown/context-palace/cp/internal/client"
+	"github.com/otherjamesbrown/context-palace/cp/internal/embedding"
 	"github.com/spf13/cobra"
 )
 
@@ -37,8 +38,15 @@ COMMANDS:
   context status|history|morning|project Project context
   task get|claim|progress|close          Task management
   artifact add                           Artifact tracking
+  requirement create|list|show|approve|   Requirement lifecycle
+              verify|reopen|link|unlink|
+              dashboard
+  knowledge create|list|show|update|     Knowledge documents
+            append|history|diff
+  recall "query"                         Semantic search
   shard metadata get|set|delete          Shard metadata ops
   shard query|create                     Shard query & create
+  admin embed-backfill                   Backfill embeddings
 
 CONFIGURATION:
   Precedence: env vars > .cp.yaml > ~/.cp/config.yaml > defaults
@@ -55,6 +63,7 @@ EXAMPLES:
   cp task get pf-123
   cp message inbox
   cp memory add "Lesson learned about timeouts"
+  cp recall "pipeline timeout issues"
   cp --output json task get pf-123`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
@@ -78,6 +87,19 @@ EXAMPLES:
 		}
 
 		cpClient = client.NewClient(cfg)
+
+		// Initialize embedding provider (warn on failure, don't block)
+		if cfg.Embedding != nil {
+			provider, err := embedding.NewProvider(cfg.Embedding)
+			if err != nil {
+				if debugFlag {
+					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: embedding provider init failed: %v\n", err)
+				}
+			} else {
+				cpClient.EmbedProvider = provider
+			}
+		}
+
 		return nil
 	},
 }

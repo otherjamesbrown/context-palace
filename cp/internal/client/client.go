@@ -7,14 +7,18 @@ import (
 	"path/filepath"
 
 	"github.com/jackc/pgx/v5"
+	pgxvec "github.com/pgvector/pgvector-go/pgx"
 	"gopkg.in/yaml.v3"
+
+	"github.com/otherjamesbrown/context-palace/cp/internal/embedding"
 )
 
 // Config holds the cp CLI configuration
 type Config struct {
-	Connection ConnectionConfig `yaml:"connection"`
-	Agent      string           `yaml:"agent"`
-	Project    string           `yaml:"project"`
+	Connection ConnectionConfig         `yaml:"connection"`
+	Agent      string                   `yaml:"agent"`
+	Project    string                   `yaml:"project"`
+	Embedding  *embedding.EmbeddingConfig `yaml:"embedding,omitempty"`
 }
 
 // ConnectionConfig holds database connection settings
@@ -27,7 +31,8 @@ type ConnectionConfig struct {
 
 // Client provides database operations for Context Palace
 type Client struct {
-	Config *Config
+	Config        *Config
+	EmbedProvider embedding.Provider
 }
 
 // NewClient creates a new client with the given config
@@ -41,6 +46,8 @@ func (c *Client) Connect(ctx context.Context) (*pgx.Conn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot connect to Context Palace at %s: %v", c.Config.Connection.Host, err)
 	}
+	// Best-effort pgvector type registration (silent failure if extension not installed)
+	_ = pgxvec.RegisterTypes(ctx, conn)
 	return conn, nil
 }
 

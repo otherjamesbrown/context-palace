@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/otherjamesbrown/context-palace/cp/internal/embedding"
 )
 
 // Shard represents a Context Palace shard
@@ -244,6 +246,9 @@ func (c *Client) CreateShardWithMetadata(ctx context.Context, title, content, sh
 		return "", fmt.Errorf("failed to create shard: %v", err)
 	}
 
+	// Embed-on-write: synchronous, non-fatal
+	c.tryEmbed(ctx, newID, shardType, title, content)
+
 	return newID, nil
 }
 
@@ -255,6 +260,10 @@ func (c *Client) UpdateShardContent(ctx context.Context, id, content string) err
 	}
 	defer conn.Close(ctx)
 
+	// Fetch type and title for embedding text
+	var shardType, title string
+	_ = conn.QueryRow(ctx, `SELECT type, title FROM shards WHERE id = $1`, id).Scan(&shardType, &title)
+
 	result, err := conn.Exec(ctx, `
 		UPDATE shards SET content = $1, updated_at = NOW() WHERE id = $2
 	`, content, id)
@@ -264,6 +273,10 @@ func (c *Client) UpdateShardContent(ctx context.Context, id, content string) err
 	if result.RowsAffected() == 0 {
 		return fmt.Errorf("shard not found: %s", id)
 	}
+
+	// Embed-on-write: synchronous, non-fatal
+	c.tryEmbed(ctx, id, shardType, title, content)
+
 	return nil
 }
 
@@ -376,4 +389,27 @@ func (c *Client) SearchShards(ctx context.Context, query string, shardType strin
 		shards = append(shards, s)
 	}
 	return shards, nil
+}
+
+// tryEmbed attempts to embed a shard's content. Non-fatal: silently ignores errors.
+func (c *Client) tryEmbed(ctx context.Context, id, shardType, title, content string) {
+	if c.EmbedProvider == nil {
+		return
+	}
+
+	text := embedding.BuildEmbeddingText(shardType, title, content)
+	if text == "" {
+		return
+	}
+
+	// Use a separate context with timeout so embedding doesn't block forever
+	embedCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	vec, err := c.EmbedProvider.Embed(embedCtx, text)
+	if err != nil {
+		return // Silent failure — shard was already created/updated
+	}
+
+	_ = c.UpdateEmbedding(ctx, id, vec)
 }
