@@ -1,0 +1,13 @@
+templates:
+  - name: ways-of-working.md
+    destination: docs/ways-of-working.md
+    has_sections: true
+  - name: ingest.md
+    destination: .claude/commands/ingest.md
+    has_sections: true
+  - name: SPEC-TEMPLATE.md
+    destination: docs/SPEC-TEMPLATE.md
+    has_sections: false
+  - name: claude-template.md
+    destination: CLAUDE.md
+    has_sections: false
