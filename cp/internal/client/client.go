@@ -11,14 +11,16 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/otherjamesbrown/context-palace/cp/internal/embedding"
+	"github.com/otherjamesbrown/context-palace/cp/internal/generation"
 )
 
 // Config holds the cp CLI configuration
 type Config struct {
-	Connection ConnectionConfig         `yaml:"connection"`
-	Agent      string                   `yaml:"agent"`
-	Project    string                   `yaml:"project"`
-	Embedding  *embedding.EmbeddingConfig `yaml:"embedding,omitempty"`
+	Connection ConnectionConfig              `yaml:"connection"`
+	Agent      string                        `yaml:"agent"`
+	Project    string                        `yaml:"project"`
+	Embedding  *embedding.EmbeddingConfig    `yaml:"embedding,omitempty"`
+	Generation *generation.GenerationConfig  `yaml:"generation,omitempty"`
 }
 
 // ConnectionConfig holds database connection settings
@@ -33,6 +35,7 @@ type ConnectionConfig struct {
 type Client struct {
 	Config        *Config
 	EmbedProvider embedding.Provider
+	Generator     generation.Generator
 }
 
 // NewClient creates a new client with the given config

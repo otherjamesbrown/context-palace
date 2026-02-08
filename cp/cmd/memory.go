@@ -87,10 +87,12 @@ var memoryListCmd = &cobra.Command{
 		labelFlag, _ := cmd.Flags().GetString("label")
 		sinceFlag, _ := cmd.Flags().GetString("since")
 		statusFlag, _ := cmd.Flags().GetString("status")
+		rootsOnly, _ := cmd.Flags().GetBool("roots")
 
 		opts := client.ListShardsOpts{
-			Types: []string{"memory"},
-			Limit: limitFlag,
+			Types:     []string{"memory"},
+			Limit:     limitFlag,
+			RootsOnly: rootsOnly,
 		}
 
 		if statusFlag != "" {
@@ -277,6 +279,7 @@ func init() {
 	memoryListCmd.Flags().String("label", "", "Filter by label (comma-separated)")
 	memoryListCmd.Flags().String("since", "", "Time filter: duration or date")
 	memoryListCmd.Flags().String("status", "open", "Filter by status")
+	memoryListCmd.Flags().Bool("roots", false, "Show only root memories (no parent)")
 
 	// memory recall flags
 	memoryRecallCmd.Flags().String("label", "", "Filter by label (comma-separated)")

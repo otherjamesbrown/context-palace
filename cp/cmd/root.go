@@ -5,6 +5,7 @@ import (
 
 	"github.com/otherjamesbrown/context-palace/cp/internal/client"
 	"github.com/otherjamesbrown/context-palace/cp/internal/embedding"
+	"github.com/otherjamesbrown/context-palace/cp/internal/generation"
 	"github.com/spf13/cobra"
 )
 
@@ -44,8 +45,10 @@ COMMANDS:
   knowledge create|list|show|update|     Knowledge documents
             append|history|diff
   recall "query"                         Semantic search
+  epic create|show|list                  Epic management
+  focus [set|clear]                      Active epic focus
   shard list|show|create|update|         Shard operations
-        close|reopen
+        close|reopen|assign|next|board
   shard edges|link|unlink                Edge navigation & management
   shard label add|remove|list            Label management
   shard metadata get|set|delete          Shard metadata ops
@@ -101,6 +104,18 @@ EXAMPLES:
 				}
 			} else {
 				cpClient.EmbedProvider = provider
+			}
+		}
+
+		// Initialize generation provider (warn on failure, don't block)
+		if cfg.Generation != nil {
+			gen, err := generation.NewGenerator(cfg.Generation)
+			if err != nil {
+				if debugFlag {
+					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: generation provider init failed: %v\n", err)
+				}
+			} else {
+				cpClient.Generator = gen
 			}
 		}
 

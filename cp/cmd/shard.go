@@ -508,40 +508,48 @@ var shardUpdateCmd = &cobra.Command{
 
 var shardCloseCmd = &cobra.Command{
 	Use:     "close <shard-id>",
-	Short:   "Close a shard",
+	Short:   "Close a shard with optional reason",
 	Args:    cobra.ExactArgs(1),
-	Example: "  cp shard close pf-abc123",
+	Example: "  cp shard close pf-abc123\n  cp shard close pf-abc123 --reason \"Done: implemented and tested\"",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		id := args[0]
 
-		// Check current status
-		shard, err := cpClient.GetShard(ctx, id)
-		if err != nil {
-			return fmt.Errorf("Shard %s not found", id)
-		}
-		if shard.Status == "closed" {
-			fmt.Printf("Shard %s is already closed.\n", id)
-			return nil
-		}
+		reason, _ := cmd.Flags().GetString("reason")
 
-		err = cpClient.UpdateShardStatus(ctx, id, "closed")
+		result, err := cpClient.CloseShard(ctx, id, reason)
 		if err != nil {
 			return err
 		}
 
 		if outputFormat == "json" {
 			out := map[string]any{
-				"id":         id,
-				"status":     "closed",
-				"updated_at": time.Now().UTC().Format(time.RFC3339),
+				"id":        result.ID,
+				"status":    result.Status,
+				"closed_at": result.ClosedAt.Format(time.RFC3339),
+			}
+			if result.Reason != "" {
+				out["reason"] = result.Reason
+			}
+			if len(result.Unblocked) > 0 {
+				var ids []string
+				for _, u := range result.Unblocked {
+					ids = append(ids, u.ID)
+				}
+				out["unblocked"] = ids
 			}
 			s, _ := client.FormatJSON(out)
 			fmt.Println(s)
 			return nil
 		}
 
-		fmt.Printf("Closed %s\n", id)
+		fmt.Printf("Closed %s %q\n", result.ID, result.Title)
+		if result.Reason != "" {
+			fmt.Printf("  Reason: %s\n", result.Reason)
+		}
+		for _, u := range result.Unblocked {
+			fmt.Printf("  Unblocked: %s %q\n", u.ID, u.Title)
+		}
 		return nil
 	},
 }
@@ -696,6 +704,9 @@ func init() {
 	shardUpdateCmd.Flags().String("body", "", "New content (inline)")
 	shardUpdateCmd.Flags().String("body-file", "", "New content (from file)")
 	shardUpdateCmd.Flags().String("title", "", "New title")
+
+	// shard close flags
+	shardCloseCmd.Flags().String("reason", "", "Closure reason")
 
 	// Wire command tree
 	shardMetadataCmd.AddCommand(shardMetadataGetCmd)

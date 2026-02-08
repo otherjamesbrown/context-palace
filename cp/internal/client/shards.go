@@ -393,14 +393,15 @@ func (c *Client) SearchShards(ctx context.Context, query string, shardType strin
 
 // ListShardsOpts holds filter options for ListShardsFiltered
 type ListShardsOpts struct {
-	Types   []string
-	Status  []string
-	Labels  []string
-	Creator string
-	Search  string
-	Since   *time.Time
-	Limit   int
-	Offset  int
+	Types     []string
+	Status    []string
+	Labels    []string
+	Creator   string
+	Search    string
+	Since     *time.Time
+	Limit     int
+	Offset    int
+	RootsOnly bool
 }
 
 // ShardListResult holds a shard list item from list_shards()
@@ -451,8 +452,8 @@ func (c *Client) ListShardsFiltered(ctx context.Context, opts ListShardsOpts) ([
 
 	rows, err := conn.Query(ctx, `
 		SELECT id, title, type, status, creator, labels, created_at, updated_at, snippet
-		FROM list_shards($1, $2, $3, $4, $5, $6, $7, $8, $9)
-	`, c.Config.Project, typesArg, statusArg, labelsArg, creatorArg, searchArg, sinceArg, limit, opts.Offset)
+		FROM list_shards($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+	`, c.Config.Project, typesArg, statusArg, labelsArg, creatorArg, searchArg, sinceArg, limit, opts.Offset, opts.RootsOnly)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list shards: %v", err)
 	}
@@ -502,8 +503,8 @@ func (c *Client) ListShardsCount(ctx context.Context, opts ListShardsOpts) (int,
 	}
 
 	var count int
-	err = conn.QueryRow(ctx, `SELECT list_shards_count($1, $2, $3, $4, $5, $6, $7)`,
-		c.Config.Project, typesArg, statusArg, labelsArg, creatorArg, searchArg, sinceArg).Scan(&count)
+	err = conn.QueryRow(ctx, `SELECT list_shards_count($1, $2, $3, $4, $5, $6, $7, $8)`,
+		c.Config.Project, typesArg, statusArg, labelsArg, creatorArg, searchArg, sinceArg, opts.RootsOnly).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("failed to count shards: %v", err)
 	}
