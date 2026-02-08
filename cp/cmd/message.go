@@ -3,6 +3,8 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/otherjamesbrown/context-palace/cp/internal/client"
@@ -16,19 +18,36 @@ var messageCmd = &cobra.Command{
 }
 
 var messageSendCmd = &cobra.Command{
-	Use:   "send <recipient> <subject>",
+	Use:   "send <recipient> <subject> [body]",
 	Short: "Send a message",
-	Args:  cobra.ExactArgs(2),
-	Example: `  cp message send agent-mycroft "Bug found in entity pipeline"
+	Args:  cobra.RangeArgs(2, 3),
+	Example: `  cp message send agent-mycroft "Subject" "Short body"
   cp message send agent-mycroft "Bug found" --body "Details here" --kind bug-report
-  cp message send agent-mycroft "Re: Bug" --body "Looking into it" --reply-to pf-abc123`,
+  cp message send agent-mycroft "Re: Bug" --body "Looking into it" --reply-to pf-abc123
+  echo "Long body" | cp message send agent-mycroft "Subject"`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
 		recipients := strings.Split(args[0], ",")
 		subject := args[1]
 
-		body, _ := cmd.Flags().GetString("body")
+		positionalBody := ""
+		if len(args) == 3 {
+			positionalBody = args[2]
+		}
+		flagBody, _ := cmd.Flags().GetString("body")
+
+		// Detect stdin: only read if not a terminal
+		var stdinReader io.Reader
+		if stat, _ := os.Stdin.Stat(); stat != nil && (stat.Mode()&os.ModeCharDevice) == 0 {
+			stdinReader = os.Stdin
+		}
+
+		body, err := resolveMessageBody(positionalBody, flagBody, stdinReader)
+		if err != nil {
+			return err
+		}
+
 		ccStr, _ := cmd.Flags().GetString("cc")
 		kind, _ := cmd.Flags().GetString("kind")
 		replyTo, _ := cmd.Flags().GetString("reply-to")
@@ -51,6 +70,41 @@ var messageSendCmd = &cobra.Command{
 		fmt.Printf("Sent message %s to %s\n", id, strings.Join(recipients, ", "))
 		return nil
 	},
+}
+
+// resolveMessageBody determines the message body from three sources in priority order:
+// 1. Positional argument (3rd arg)
+// 2. --body flag
+// 3. stdin (when piped)
+// Returns an error if both positional and flag are provided, or if no body is available.
+func resolveMessageBody(positional, flag string, stdin io.Reader) (string, error) {
+	positional = strings.TrimSpace(positional)
+	flag = strings.TrimSpace(flag)
+
+	if positional != "" && flag != "" {
+		return "", fmt.Errorf("cannot specify both positional body argument and --body flag")
+	}
+
+	if positional != "" {
+		return positional, nil
+	}
+	if flag != "" {
+		return flag, nil
+	}
+
+	// Try stdin
+	if stdin != nil {
+		data, err := io.ReadAll(stdin)
+		if err != nil {
+			return "", fmt.Errorf("reading stdin: %w", err)
+		}
+		body := strings.TrimSpace(string(data))
+		if body != "" {
+			return body, nil
+		}
+	}
+
+	return "", fmt.Errorf("message body is required: provide as 3rd argument, --body flag, or pipe to stdin")
 }
 
 var messageInboxCmd = &cobra.Command{
