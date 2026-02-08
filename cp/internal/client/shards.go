@@ -162,6 +162,11 @@ func (c *Client) ClaimTask(ctx context.Context, id string) (bool, error) {
 	return success, nil
 }
 
+// FormatProgressNote formats a progress note for appending to shard content.
+func FormatProgressNote(timestamp, agent, note string) string {
+	return fmt.Sprintf("\n\n---\n**[%s] %s:** %s", timestamp, agent, note)
+}
+
 // AddProgress adds a progress note to a task
 func (c *Client) AddProgress(ctx context.Context, id, note string) error {
 	conn, err := c.Connect(ctx)
@@ -170,8 +175,7 @@ func (c *Client) AddProgress(ctx context.Context, id, note string) error {
 	}
 	defer conn.Close(ctx)
 
-	timestamp := time.Now().Format("2006-01-02 15:04:05")
-	progressNote := fmt.Sprintf("\n\n---\n**[%s] %s:** %s", timestamp, c.Config.Agent, note)
+	progressNote := FormatProgressNote(time.Now().Format("2006-01-02 15:04:05"), c.Config.Agent, note)
 
 	result, err := conn.Exec(ctx, `
 		UPDATE shards SET content = content || $1, updated_at = NOW()

@@ -42,6 +42,37 @@ var validTransitions = map[string][]string{
 	"verified":    {"approved"},
 }
 
+// parseLifecycleFromMeta extracts lifecycle_status from raw JSON metadata.
+// Returns "draft" if the field is missing or metadata is invalid.
+func parseLifecycleFromMeta(metaJSON []byte) string {
+	var m map[string]interface{}
+	if err := json.Unmarshal(metaJSON, &m); err != nil {
+		return "draft"
+	}
+	if status, ok := m["lifecycle_status"].(string); ok {
+		return status
+	}
+	return "draft"
+}
+
+// resolveEdgeDirection returns (fromID, toID) for a requirement edge operation
+// based on the edge type conventions.
+func resolveEdgeDirection(reqID, targetID, edgeType string) (fromID, toID string, err error) {
+	switch edgeType {
+	case "implements":
+		// task --implements--> requirement
+		return targetID, reqID, nil
+	case "has-artifact":
+		// test --has-artifact--> requirement
+		return targetID, reqID, nil
+	case "blocked-by":
+		// requirement --blocked-by--> dependency
+		return reqID, targetID, nil
+	default:
+		return "", "", fmt.Errorf("unknown edge type: %s", edgeType)
+	}
+}
+
 // validateTransition checks if a lifecycle transition is valid
 func validateTransition(from, to string) error {
 	allowed, ok := validTransitions[from]
@@ -73,14 +104,7 @@ func (c *Client) getLifecycleStatus(ctx context.Context, conn *pgx.Conn, id stri
 		return "", fmt.Errorf("shard %s is type '%s', expected 'requirement'", id, shardType)
 	}
 
-	var m map[string]interface{}
-	if err := json.Unmarshal(meta, &m); err != nil {
-		return "draft", nil
-	}
-	if status, ok := m["lifecycle_status"].(string); ok {
-		return status, nil
-	}
-	return "draft", nil
+	return parseLifecycleFromMeta(meta), nil
 }
 
 // CreateRequirement creates a requirement shard with lifecycle metadata
@@ -419,19 +443,9 @@ func (c *Client) UnlinkEdge(ctx context.Context, reqID, targetID, edgeType strin
 	}
 	defer conn.Close(ctx)
 
-	var fromID, toID string
-	switch edgeType {
-	case "implements":
-		// task --implements--> requirement
-		fromID, toID = targetID, reqID
-	case "has-artifact":
-		// test --has-artifact--> requirement
-		fromID, toID = targetID, reqID
-	case "blocked-by":
-		// requirement --blocked-by--> dependency
-		fromID, toID = reqID, targetID
-	default:
-		return fmt.Errorf("unknown edge type: %s", edgeType)
+	fromID, toID, resolveErr := resolveEdgeDirection(reqID, targetID, edgeType)
+	if resolveErr != nil {
+		return resolveErr
 	}
 
 	result, err := conn.Exec(ctx, `

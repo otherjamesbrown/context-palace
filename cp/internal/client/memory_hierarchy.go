@@ -669,6 +669,53 @@ type SyncResult struct {
 	Fixed          bool              `json:"fixed"`
 }
 
+// syncChildEntry holds minimal child info for discrepancy detection.
+type syncChildEntry struct {
+	ID    string
+	Title string
+}
+
+// findSyncDiscrepancies compares pointer block entries against actual children
+// and returns any missing_pointer or stale_pointer discrepancies.
+// Pure function — no DB access.
+func findSyncDiscrepancies(parentID string, blockEntries []pointer.SubMemoryEntry, actualChildren []syncChildEntry) []SyncDiscrepancy {
+	blockMap := map[string]pointer.SubMemoryEntry{}
+	for _, e := range blockEntries {
+		blockMap[e.ID] = e
+	}
+	actualMap := map[string]syncChildEntry{}
+	for _, ch := range actualChildren {
+		actualMap[ch.ID] = ch
+	}
+
+	var discs []SyncDiscrepancy
+
+	// Find missing pointers (child exists but not in block)
+	for _, ch := range actualChildren {
+		if _, found := blockMap[ch.ID]; !found {
+			discs = append(discs, SyncDiscrepancy{
+				ParentID:   parentID,
+				Type:       "missing_pointer",
+				ChildID:    ch.ID,
+				ChildTitle: ch.Title,
+			})
+		}
+	}
+
+	// Find stale pointers (in block but child doesn't exist)
+	for _, entry := range blockEntries {
+		if _, found := actualMap[entry.ID]; !found {
+			discs = append(discs, SyncDiscrepancy{
+				ParentID: parentID,
+				Type:     "stale_pointer",
+				ChildID:  entry.ID,
+			})
+		}
+	}
+
+	return discs
+}
+
 // SyncMemoryPointers reconciles pointer blocks with actual graph.
 func (c *Client) SyncMemoryPointers(ctx context.Context, parentID *string, dryRun bool) (*SyncResult, error) {
 	conn, err := c.Connect(ctx)
@@ -721,10 +768,6 @@ func (c *Client) SyncMemoryPointers(ctx context.Context, parentID *string, dryRu
 	for _, parent := range parents {
 		// Parse pointer block
 		_, blockEntries, _ := pointer.ParseSubMemories(parent.content)
-		blockMap := map[string]pointer.SubMemoryEntry{}
-		for _, e := range blockEntries {
-			blockMap[e.ID] = e
-		}
 
 		// Get actual children from DB
 		childRows, err := conn.Query(ctx, `
@@ -738,42 +781,17 @@ func (c *Client) SyncMemoryPointers(ctx context.Context, parentID *string, dryRu
 			continue
 		}
 
-		type childInfo struct {
-			id, title, edgeSummary string
-		}
-		var actualChildren []childInfo
-		actualMap := map[string]childInfo{}
+		var actualChildren []syncChildEntry
 		for childRows.Next() {
-			var ch childInfo
-			if childRows.Scan(&ch.id, &ch.title, &ch.edgeSummary) == nil {
+			var ch syncChildEntry
+			var edgeSummary string
+			if childRows.Scan(&ch.ID, &ch.Title, &edgeSummary) == nil {
 				actualChildren = append(actualChildren, ch)
-				actualMap[ch.id] = ch
 			}
 		}
 		childRows.Close()
 
-		// Find missing pointers (child exists but not in block)
-		for _, ch := range actualChildren {
-			if _, found := blockMap[ch.id]; !found {
-				discs = append(discs, SyncDiscrepancy{
-					ParentID:   parent.id,
-					Type:       "missing_pointer",
-					ChildID:    ch.id,
-					ChildTitle: ch.title,
-				})
-			}
-		}
-
-		// Find stale pointers (in block but shard doesn't exist)
-		for _, entry := range blockEntries {
-			if _, found := actualMap[entry.ID]; !found {
-				discs = append(discs, SyncDiscrepancy{
-					ParentID: parent.id,
-					Type:     "stale_pointer",
-					ChildID:  entry.ID,
-				})
-			}
-		}
+		discs = append(discs, findSyncDiscrepancies(parent.id, blockEntries, actualChildren)...)
 	}
 
 	result.Discrepancies = discs
