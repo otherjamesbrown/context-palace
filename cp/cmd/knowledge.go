@@ -81,8 +81,9 @@ var kdListCmd = &cobra.Command{
 		ctx := context.Background()
 
 		docType, _ := cmd.Flags().GetString("doc-type")
+		labelFilter, _ := cmd.Flags().GetString("label")
 
-		docs, err := cpClient.ListKnowledgeDocs(ctx, docType, limitFlag)
+		docs, err := cpClient.ListKnowledgeDocs(ctx, docType, labelFilter, limitFlag)
 		if err != nil {
 			return err
 		}
@@ -98,10 +99,14 @@ var kdListCmd = &cobra.Command{
 			return nil
 		}
 
-		tbl := client.NewTable("ID", "DOC TYPE", "VERSION", "UPDATED", "TITLE")
+		tbl := client.NewTable("ID", "DOC TYPE", "VERSION", "READS", "UPDATED", "TITLE")
 		for _, d := range docs {
+			reads := "-"
+			if d.AccessCount > 0 {
+				reads = fmt.Sprintf("%d", d.AccessCount)
+			}
 			tbl.AddRow(d.ID, d.DocType, fmt.Sprintf("%d", d.Version),
-				d.UpdatedAt.Format("2006-01-02"), client.Truncate(d.Title, 50))
+				reads, d.UpdatedAt.Format("2006-01-02"), client.Truncate(d.Title, 50))
 		}
 		fmt.Print(tbl.String())
 		return nil
@@ -131,6 +136,27 @@ var kdShowCmd = &cobra.Command{
 			return err
 		}
 
+		// Touch telemetry for current version reads (fire-and-forget)
+		if versionFlag == 0 {
+			_ = cpClient.KnowledgeTouch(ctx, id, cpClient.Config.Agent)
+		}
+
+		// Extract access stats from metadata
+		var accessCount int
+		var lastAccessed string
+		if doc.Metadata != nil {
+			if v, ok := doc.Metadata["access_count"]; ok {
+				if f, ok := v.(float64); ok {
+					accessCount = int(f)
+				}
+			}
+			if v, ok := doc.Metadata["last_accessed"]; ok {
+				if s, ok := v.(string); ok {
+					lastAccessed = s
+				}
+			}
+		}
+
 		if outputFormat == "json" {
 			s, _ := client.FormatJSON(doc)
 			fmt.Println(s)
@@ -156,6 +182,13 @@ var kdShowCmd = &cobra.Command{
 		fmt.Printf("Type: %s | Version: %d | Updated: %s\n", doc.DocType, doc.Version, displayDate.Format("2006-01-02"))
 		if len(doc.Labels) > 0 {
 			fmt.Printf("Labels: %s\n", strings.Join(doc.Labels, ", "))
+		}
+		if accessCount > 0 {
+			accessStr := fmt.Sprintf("%d times", accessCount)
+			if lastAccessed != "" {
+				accessStr += fmt.Sprintf(" (last: %s)", lastAccessed)
+			}
+			fmt.Printf("Accessed: %s\n", accessStr)
 		}
 		fmt.Printf("\n%s\n", doc.Content)
 		return nil
@@ -377,6 +410,7 @@ func init() {
 
 	// list flags
 	kdListCmd.Flags().String("doc-type", "", "Filter by document type")
+	kdListCmd.Flags().String("label", "", "Filter by label")
 
 	// show flags
 	kdShowCmd.Flags().Int("version", 0, "Show specific version number")

@@ -16,15 +16,16 @@ var ValidDocTypes = []string{"architecture", "vision", "roadmap", "decision", "r
 
 // KnowledgeDoc represents a knowledge document shard
 type KnowledgeDoc struct {
-	ID        string         `json:"id"`
-	Title     string         `json:"title"`
-	Content   string         `json:"content,omitempty"`
-	DocType   string         `json:"doc_type"`
-	Version   int            `json:"version"`
-	Labels    []string       `json:"labels,omitempty"`
-	Metadata  map[string]any `json:"metadata,omitempty"`
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
+	ID          string         `json:"id"`
+	Title       string         `json:"title"`
+	Content     string         `json:"content,omitempty"`
+	DocType     string         `json:"doc_type"`
+	Version     int            `json:"version"`
+	AccessCount int            `json:"access_count,omitempty"`
+	Labels      []string       `json:"labels,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
 }
 
 // VersionEntry represents a single version in document history
@@ -70,8 +71,8 @@ func (c *Client) CreateKnowledgeDoc(ctx context.Context, title, content, docType
 	return c.CreateShardWithMetadata(ctx, title, content, "knowledge", nil, labels, json.RawMessage(metaJSON))
 }
 
-// ListKnowledgeDocs lists knowledge documents with optional doc_type filter
-func (c *Client) ListKnowledgeDocs(ctx context.Context, docTypeFilter string, limit int) ([]KnowledgeDoc, error) {
+// ListKnowledgeDocs lists knowledge documents with optional doc_type and label filters
+func (c *Client) ListKnowledgeDocs(ctx context.Context, docTypeFilter string, labelFilter string, limit int) ([]KnowledgeDoc, error) {
 	conn, err := c.Connect(ctx)
 	if err != nil {
 		return nil, err
@@ -81,6 +82,7 @@ func (c *Client) ListKnowledgeDocs(ctx context.Context, docTypeFilter string, li
 	query := `
 		SELECT s.id, s.title, COALESCE(s.metadata->>'doc_type', ''),
 			COALESCE((s.metadata->>'version')::int, 1),
+			COALESCE((s.metadata->>'access_count')::int, 0),
 			s.created_at, s.updated_at
 		FROM shards s
 		WHERE s.project = $1 AND s.type = 'knowledge' AND s.status = 'open'
@@ -92,6 +94,12 @@ func (c *Client) ListKnowledgeDocs(ctx context.Context, docTypeFilter string, li
 		query += fmt.Sprintf(` AND s.metadata @> $%d::jsonb`, paramIdx)
 		filterJSON, _ := json.Marshal(map[string]string{"doc_type": docTypeFilter})
 		args = append(args, string(filterJSON))
+		paramIdx++
+	}
+
+	if labelFilter != "" {
+		query += fmt.Sprintf(` AND $%d = ANY(s.labels)`, paramIdx)
+		args = append(args, labelFilter)
 		paramIdx++
 	}
 
@@ -108,7 +116,7 @@ func (c *Client) ListKnowledgeDocs(ctx context.Context, docTypeFilter string, li
 	for rows.Next() {
 		var d KnowledgeDoc
 		if err := rows.Scan(&d.ID, &d.Title, &d.DocType, &d.Version,
-			&d.CreatedAt, &d.UpdatedAt); err != nil {
+			&d.AccessCount, &d.CreatedAt, &d.UpdatedAt); err != nil {
 			continue
 		}
 		docs = append(docs, d)
@@ -145,6 +153,9 @@ func (c *Client) ShowKnowledgeDoc(ctx context.Context, id string) (*KnowledgeDoc
 			}
 			if v, ok := meta["version"].(float64); ok {
 				doc.Version = int(v)
+			}
+			if v, ok := meta["access_count"].(float64); ok {
+				doc.AccessCount = int(v)
 			}
 		}
 	}
@@ -324,6 +335,21 @@ func (c *Client) DiffVersions(ctx context.Context, id string, from, to int) (str
 		Context:  3,
 	}
 	return difflib.GetUnifiedDiffString(diff)
+}
+
+// KnowledgeTouch increments access telemetry for a knowledge document.
+func (c *Client) KnowledgeTouch(ctx context.Context, docID string, agent string) error {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close(ctx)
+
+	_, err = conn.Exec(ctx, `SELECT knowledge_touch($1, $2)`, docID, agent)
+	if err != nil {
+		return fmt.Errorf("failed to touch knowledge doc %s: %v", docID, err)
+	}
+	return nil
 }
 
 // extractPgMessage extracts the message from a PostgreSQL error string.
