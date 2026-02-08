@@ -22,6 +22,11 @@ type RecallResult struct {
 
 // SemanticSearch performs vector similarity search using the semantic_search() SQL function.
 func (c *Client) SemanticSearch(ctx context.Context, queryEmbedding []float32, types []string, labels []string, status []string, limit int, minSimilarity float64) ([]RecallResult, error) {
+	return c.SemanticSearchWithSince(ctx, queryEmbedding, types, labels, status, limit, minSimilarity, nil)
+}
+
+// SemanticSearchWithSince performs semantic search with an optional time cutoff.
+func (c *Client) SemanticSearchWithSince(ctx context.Context, queryEmbedding []float32, types []string, labels []string, status []string, limit int, minSimilarity float64, since *time.Time) ([]RecallResult, error) {
 	conn, err := c.Connect(ctx)
 	if err != nil {
 		return nil, err
@@ -31,7 +36,7 @@ func (c *Client) SemanticSearch(ctx context.Context, queryEmbedding []float32, t
 	vec := pgvec.NewVector(queryEmbedding)
 
 	// Convert nil slices to typed nil for proper SQL NULL handling
-	var typesArg, labelsArg, statusArg interface{}
+	var typesArg, labelsArg, statusArg, sinceArg any
 	if types != nil {
 		typesArg = types
 	}
@@ -41,11 +46,14 @@ func (c *Client) SemanticSearch(ctx context.Context, queryEmbedding []float32, t
 	if status != nil {
 		statusArg = status
 	}
+	if since != nil {
+		sinceArg = *since
+	}
 
 	rows, err := conn.Query(ctx, `
 		SELECT id, title, type, status, similarity, snippet, labels, created_at
-		FROM semantic_search($1, $2, $3, $4, $5, $6, $7)
-	`, c.Config.Project, vec, typesArg, labelsArg, statusArg, limit, minSimilarity)
+		FROM semantic_search($1, $2, $3, $4, $5, $6, $7, $8)
+	`, c.Config.Project, vec, typesArg, labelsArg, statusArg, limit, minSimilarity, sinceArg)
 	if err != nil {
 		return nil, fmt.Errorf("semantic search failed: %v", err)
 	}
@@ -55,6 +63,55 @@ func (c *Client) SemanticSearch(ctx context.Context, queryEmbedding []float32, t
 	for rows.Next() {
 		var r RecallResult
 		if err := rows.Scan(&r.ID, &r.Title, &r.Type, &r.Status, &r.Similarity, &r.Snippet, &r.Labels, &r.CreatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan result: %v", err)
+		}
+		results = append(results, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("result iteration error: %v", err)
+	}
+
+	return results, nil
+}
+
+// MemoryRecallResult represents a memory semantic search result
+type MemoryRecallResult struct {
+	ID         string    `json:"id"`
+	Title      string    `json:"title"`
+	Content    string    `json:"content"`
+	Similarity float64   `json:"similarity"`
+	Labels     []string  `json:"labels,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// MemoryRecall performs semantic search limited to memory shards.
+func (c *Client) MemoryRecall(ctx context.Context, queryEmbedding []float32, labels []string, limit int, minSimilarity float64) ([]MemoryRecallResult, error) {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(ctx)
+
+	vec := pgvec.NewVector(queryEmbedding)
+
+	var labelsArg any
+	if labels != nil {
+		labelsArg = labels
+	}
+
+	rows, err := conn.Query(ctx, `
+		SELECT id, title, content, similarity, labels, created_at
+		FROM memory_recall($1, $2, $3, $4, $5)
+	`, c.Config.Project, vec, labelsArg, limit, minSimilarity)
+	if err != nil {
+		return nil, fmt.Errorf("memory recall failed: %v", err)
+	}
+	defer rows.Close()
+
+	var results []MemoryRecallResult
+	for rows.Next() {
+		var r MemoryRecallResult
+		if err := rows.Scan(&r.ID, &r.Title, &r.Content, &r.Similarity, &r.Labels, &r.CreatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan result: %v", err)
 		}
 		results = append(results, r)

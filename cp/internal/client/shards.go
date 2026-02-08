@@ -391,6 +391,172 @@ func (c *Client) SearchShards(ctx context.Context, query string, shardType strin
 	return shards, nil
 }
 
+// ListShardsOpts holds filter options for ListShardsFiltered
+type ListShardsOpts struct {
+	Types   []string
+	Status  []string
+	Labels  []string
+	Creator string
+	Search  string
+	Since   *time.Time
+	Limit   int
+	Offset  int
+}
+
+// ShardListResult holds a shard list item from list_shards()
+type ShardListResult struct {
+	ID        string    `json:"id"`
+	Title     string    `json:"title"`
+	Type      string    `json:"type"`
+	Status    string    `json:"status"`
+	Creator   string    `json:"creator"`
+	Labels    []string  `json:"labels,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Snippet   string    `json:"snippet,omitempty"`
+}
+
+// ListShardsFiltered lists shards using the list_shards() SQL function with all filters
+func (c *Client) ListShardsFiltered(ctx context.Context, opts ListShardsOpts) ([]ShardListResult, error) {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(ctx)
+
+	var typesArg, statusArg, labelsArg, creatorArg, searchArg, sinceArg any
+	if opts.Types != nil {
+		typesArg = opts.Types
+	}
+	if opts.Status != nil {
+		statusArg = opts.Status
+	}
+	if opts.Labels != nil {
+		labelsArg = opts.Labels
+	}
+	if opts.Creator != "" {
+		creatorArg = opts.Creator
+	}
+	if opts.Search != "" {
+		searchArg = opts.Search
+	}
+	if opts.Since != nil {
+		sinceArg = *opts.Since
+	}
+
+	limit := opts.Limit
+	if limit == 0 {
+		limit = 20
+	}
+
+	rows, err := conn.Query(ctx, `
+		SELECT id, title, type, status, creator, labels, created_at, updated_at, snippet
+		FROM list_shards($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	`, c.Config.Project, typesArg, statusArg, labelsArg, creatorArg, searchArg, sinceArg, limit, opts.Offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list shards: %v", err)
+	}
+	defer rows.Close()
+
+	var results []ShardListResult
+	for rows.Next() {
+		var r ShardListResult
+		if err := rows.Scan(&r.ID, &r.Title, &r.Type, &r.Status, &r.Creator,
+			&r.Labels, &r.CreatedAt, &r.UpdatedAt, &r.Snippet); err != nil {
+			return nil, fmt.Errorf("failed to scan shard: %v", err)
+		}
+		results = append(results, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("shard list iteration error: %v", err)
+	}
+	return results, nil
+}
+
+// ListShardsCount returns the total count of shards matching the given filters
+func (c *Client) ListShardsCount(ctx context.Context, opts ListShardsOpts) (int, error) {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer conn.Close(ctx)
+
+	var typesArg, statusArg, labelsArg, creatorArg, searchArg, sinceArg any
+	if opts.Types != nil {
+		typesArg = opts.Types
+	}
+	if opts.Status != nil {
+		statusArg = opts.Status
+	}
+	if opts.Labels != nil {
+		labelsArg = opts.Labels
+	}
+	if opts.Creator != "" {
+		creatorArg = opts.Creator
+	}
+	if opts.Search != "" {
+		searchArg = opts.Search
+	}
+	if opts.Since != nil {
+		sinceArg = *opts.Since
+	}
+
+	var count int
+	err = conn.QueryRow(ctx, `SELECT list_shards_count($1, $2, $3, $4, $5, $6, $7)`,
+		c.Config.Project, typesArg, statusArg, labelsArg, creatorArg, searchArg, sinceArg).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count shards: %v", err)
+	}
+	return count, nil
+}
+
+// UpdateShardResult holds the result of an update_shard() call
+type UpdateShardResult struct {
+	ID             string    `json:"id"`
+	UpdatedAt      time.Time `json:"updated_at"`
+	TitleChanged   bool      `json:"title_changed,omitempty"`
+	ContentChanged bool      `json:"content_changed,omitempty"`
+	ShardType      string    `json:"shard_type"`
+}
+
+// UpdateShardFields updates a shard's title and/or content using update_shard()
+func (c *Client) UpdateShardFields(ctx context.Context, id string, title *string, content *string) (*UpdateShardResult, error) {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(ctx)
+
+	var titleArg, contentArg any
+	if title != nil {
+		titleArg = *title
+	}
+	if content != nil {
+		contentArg = *content
+	}
+
+	var r UpdateShardResult
+	err = conn.QueryRow(ctx, `
+		SELECT id, updated_at, title_changed, content_changed, shard_type
+		FROM update_shard($1, $2, $3, $4)
+	`, id, c.Config.Project, titleArg, contentArg).Scan(
+		&r.ID, &r.UpdatedAt, &r.TitleChanged, &r.ContentChanged, &r.ShardType)
+	if err != nil {
+		return nil, fmt.Errorf("%s", extractPgMessage(err.Error()))
+	}
+
+	// Re-embed if content changed
+	if content != nil {
+		var shardTitle string
+		if title != nil {
+			shardTitle = *title
+		}
+		c.tryEmbed(ctx, id, r.ShardType, shardTitle, *content)
+	}
+
+	return &r, nil
+}
+
 // tryEmbed attempts to embed a shard's content. Non-fatal: silently ignores errors.
 func (c *Client) tryEmbed(ctx context.Context, id, shardType, title, content string) {
 	if c.EmbedProvider == nil {

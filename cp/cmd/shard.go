@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/otherjamesbrown/context-palace/cp/internal/client"
 	"github.com/spf13/cobra"
@@ -188,33 +190,49 @@ var shardQueryCmd = &cobra.Command{
 
 var shardCreateCmd = &cobra.Command{
 	Use:   "create",
-	Short: "Create a new shard with metadata",
-	Example: `  cp shard create --type requirement --title "Test Req" --meta '{"lifecycle_status":"draft","priority":2}'
-  cp shard create --type task --title "Fix bug" --priority 1 --label urgent --label backend`,
+	Short: "Create a new shard",
+	Example: `  cp shard create --type design --title "Entity filter architecture" --body "## Design"
+  cp shard create --type task --title "Fix bug" --body-file design.md --label urgent,backend
+  cp shard create --type bug --title "Missing names" --meta '{"severity":"high"}'`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
 		title, _ := cmd.Flags().GetString("title")
 		shardType, _ := cmd.Flags().GetString("type")
-		content, _ := cmd.Flags().GetString("content")
+		body, _ := cmd.Flags().GetString("body")
+		bodyFile, _ := cmd.Flags().GetString("body-file")
 		metaFlag, _ := cmd.Flags().GetString("meta")
-		labels, _ := cmd.Flags().GetStringSlice("label")
+		labelFlag, _ := cmd.Flags().GetString("label")
 
+		if shardType == "" {
+			return fmt.Errorf("--type is required")
+		}
 		if title == "" {
 			return fmt.Errorf("--title is required")
 		}
+		if body != "" && bodyFile != "" {
+			return fmt.Errorf("cannot use both --body and --body-file")
+		}
 
-		var pri *int
-		if cmd.Flags().Changed("priority") {
-			p, _ := cmd.Flags().GetInt("priority")
-			pri = &p
+		var content string
+		if bodyFile != "" {
+			data, err := os.ReadFile(bodyFile)
+			if err != nil {
+				return fmt.Errorf("cannot read file '%s': %v", bodyFile, err)
+			}
+			content = string(data)
+		} else {
+			content = body
+		}
+
+		var labels []string
+		if labelFlag != "" {
+			labels = strings.Split(labelFlag, ",")
 		}
 
 		var metadata json.RawMessage
 		if metaFlag != "" {
-			// Validate JSON
 			if !json.Valid([]byte(metaFlag)) {
-				// Try parsing as key=value pairs
 				parsed, err := parseMetaFlag(metaFlag)
 				if err != nil {
 					return fmt.Errorf("invalid JSON in --meta: %v", err)
@@ -223,24 +241,349 @@ var shardCreateCmd = &cobra.Command{
 			} else {
 				metadata = json.RawMessage(metaFlag)
 			}
-
-			// Check size (1MB limit)
-			if len(metadata) > 1024*1024 {
-				return fmt.Errorf("metadata too large (%.1fMB). Maximum 1MB", float64(len(metadata))/(1024*1024))
-			}
 		}
 
-		id, err := cpClient.CreateShardWithMetadata(ctx, title, content, shardType, pri, labels, metadata)
+		id, err := cpClient.CreateShardWithMetadata(ctx, title, content, shardType, nil, labels, metadata)
 		if err != nil {
 			return err
 		}
 
 		if outputFormat == "json" {
-			fmt.Printf(`{"id": "%s"}`+"\n", id)
+			result := map[string]any{
+				"id":         id,
+				"type":       shardType,
+				"title":      title,
+				"created_at": time.Now().UTC().Format(time.RFC3339),
+			}
+			s, _ := client.FormatJSON(result)
+			fmt.Println(s)
 			return nil
 		}
 
-		fmt.Printf("Created shard %s\n", id)
+		fmt.Printf("Created shard %s (%s)\n", id, shardType)
+		return nil
+	},
+}
+
+// -- shard list --
+
+var shardListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List shards with filters",
+	Example: `  cp shard list
+  cp shard list --type task --status open
+  cp shard list --type requirement,bug --label architecture
+  cp shard list --search "timeout" --since 7d`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+
+		typeFlag, _ := cmd.Flags().GetString("type")
+		statusFlag, _ := cmd.Flags().GetString("status")
+		labelFlag, _ := cmd.Flags().GetString("label")
+		creatorFlag, _ := cmd.Flags().GetString("creator")
+		searchFlag, _ := cmd.Flags().GetString("search")
+		sinceFlag, _ := cmd.Flags().GetString("since")
+		offset, _ := cmd.Flags().GetInt("offset")
+
+		if limitFlag < 1 || limitFlag > 1000 {
+			return fmt.Errorf("limit must be 1-1000")
+		}
+
+		opts := client.ListShardsOpts{
+			Limit:  limitFlag,
+			Offset: offset,
+		}
+		if typeFlag != "" {
+			opts.Types = strings.Split(typeFlag, ",")
+		}
+		if statusFlag != "" {
+			opts.Status = strings.Split(statusFlag, ",")
+		}
+		if labelFlag != "" {
+			opts.Labels = strings.Split(labelFlag, ",")
+		}
+		if creatorFlag != "" {
+			opts.Creator = creatorFlag
+		}
+		if searchFlag != "" {
+			opts.Search = searchFlag
+		}
+		if sinceFlag != "" {
+			cutoff, err := parseSince(sinceFlag)
+			if err != nil {
+				return err
+			}
+			opts.Since = &cutoff
+		}
+
+		results, err := cpClient.ListShardsFiltered(ctx, opts)
+		if err != nil {
+			return err
+		}
+
+		total, err := cpClient.ListShardsCount(ctx, opts)
+		if err != nil {
+			return err
+		}
+
+		if outputFormat == "json" {
+			out := map[string]any{
+				"total":   total,
+				"offset":  offset,
+				"limit":   limitFlag,
+				"results": results,
+			}
+			s, _ := client.FormatJSON(out)
+			fmt.Println(s)
+			return nil
+		}
+
+		if len(results) == 0 {
+			fmt.Println("No shards found.")
+			return nil
+		}
+
+		tbl := client.NewTable("ID", "TYPE", "STATUS", "CREATED", "TITLE")
+		for _, r := range results {
+			tbl.AddRow(r.ID, r.Type, r.Status, r.CreatedAt.Format("2006-01-02"), client.Truncate(r.Title, 50))
+		}
+		fmt.Print(tbl.String())
+
+		start := offset + 1
+		end := offset + len(results)
+		fmt.Printf("\nShowing %d-%d of %d results\n", start, end, total)
+		return nil
+	},
+}
+
+// -- shard show --
+
+var shardShowCmd = &cobra.Command{
+	Use:     "show <shard-id>",
+	Short:   "Show shard detail",
+	Args:    cobra.ExactArgs(1),
+	Example: "  cp shard show pf-c74eea",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		id := args[0]
+
+		detail, err := cpClient.GetShardDetail(ctx, id)
+		if err != nil {
+			return err
+		}
+
+		// Get edges
+		edges, err := cpClient.GetShardEdges(ctx, id, "", nil)
+		if err != nil {
+			return err
+		}
+		detail.Edges = edges
+
+		if outputFormat == "json" {
+			s, _ := client.FormatJSON(detail)
+			fmt.Println(s)
+			return nil
+		}
+
+		// Text output
+		fmt.Println(detail.Title)
+		fmt.Println(strings.Repeat("─", len(detail.Title)))
+		fmt.Printf("ID:       %s\n", detail.ID)
+		fmt.Printf("Type:     %s\n", detail.Type)
+		fmt.Printf("Status:   %s\n", detail.Status)
+		fmt.Printf("Creator:  %s\n", detail.Creator)
+		fmt.Printf("Created:  %s\n", detail.CreatedAt.Format("2006-01-02 15:04"))
+
+		if len(detail.Labels) > 0 {
+			fmt.Printf("Labels:   %s\n", strings.Join(detail.Labels, ", "))
+		}
+
+		// Metadata
+		if detail.Metadata != nil && string(detail.Metadata) != "{}" {
+			fmt.Println("\nMetadata:")
+			var meta map[string]any
+			if json.Unmarshal(detail.Metadata, &meta) == nil {
+				for k, v := range meta {
+					fmt.Printf("  %s: %v\n", k, v)
+				}
+			}
+		}
+
+		// Content
+		if detail.Content != "" {
+			fmt.Println("\nContent:")
+			fmt.Printf("  %s\n", detail.Content)
+		}
+
+		// Edges
+		if len(edges) > 0 {
+			fmt.Println("\nEdges:")
+			tbl := client.NewTable("DIRECTION", "EDGE TYPE", "SHARD", "TYPE", "TITLE")
+			for _, e := range edges {
+				tbl.AddRow(e.Direction, e.EdgeType, e.ShardID, e.Type, client.Truncate(e.Title, 40))
+			}
+			fmt.Print("  ")
+			fmt.Print(strings.ReplaceAll(tbl.String(), "\n", "\n  "))
+		}
+
+		return nil
+	},
+}
+
+// -- shard update --
+
+var shardUpdateCmd = &cobra.Command{
+	Use:   "update <shard-id>",
+	Short: "Update shard content or title",
+	Args:  cobra.ExactArgs(1),
+	Example: `  cp shard update pf-abc123 --body "Updated content"
+  cp shard update pf-abc123 --body-file updated.md
+  cp shard update pf-abc123 --title "New Title"`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		id := args[0]
+
+		body, _ := cmd.Flags().GetString("body")
+		bodyFile, _ := cmd.Flags().GetString("body-file")
+		title, _ := cmd.Flags().GetString("title")
+
+		if body == "" && bodyFile == "" && title == "" {
+			return fmt.Errorf("at least one of --body, --body-file, or --title is required")
+		}
+		if body != "" && bodyFile != "" {
+			return fmt.Errorf("cannot use both --body and --body-file")
+		}
+
+		var contentPtr *string
+		if bodyFile != "" {
+			data, err := os.ReadFile(bodyFile)
+			if err != nil {
+				return fmt.Errorf("cannot read file '%s': %v", bodyFile, err)
+			}
+			content := string(data)
+			contentPtr = &content
+		} else if body != "" {
+			contentPtr = &body
+		}
+
+		var titlePtr *string
+		if title != "" {
+			titlePtr = &title
+		}
+
+		result, err := cpClient.UpdateShardFields(ctx, id, titlePtr, contentPtr)
+		if err != nil {
+			return err
+		}
+
+		// Warn if knowledge doc
+		if result.ShardType == "knowledge" {
+			fmt.Fprintf(os.Stderr, "Warning: This is a knowledge document. Use `cp knowledge update` to preserve version history.\n")
+		}
+
+		if outputFormat == "json" {
+			var updatedFields []string
+			if result.ContentChanged {
+				updatedFields = append(updatedFields, "content")
+			}
+			if result.TitleChanged {
+				updatedFields = append(updatedFields, "title")
+			}
+			out := map[string]any{
+				"id":             id,
+				"updated_fields": updatedFields,
+				"updated_at":     result.UpdatedAt.Format(time.RFC3339),
+			}
+			s, _ := client.FormatJSON(out)
+			fmt.Println(s)
+			return nil
+		}
+
+		fmt.Printf("Updated %s\n", id)
+		return nil
+	},
+}
+
+// -- shard close --
+
+var shardCloseCmd = &cobra.Command{
+	Use:     "close <shard-id>",
+	Short:   "Close a shard",
+	Args:    cobra.ExactArgs(1),
+	Example: "  cp shard close pf-abc123",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		id := args[0]
+
+		// Check current status
+		shard, err := cpClient.GetShard(ctx, id)
+		if err != nil {
+			return fmt.Errorf("Shard %s not found", id)
+		}
+		if shard.Status == "closed" {
+			fmt.Printf("Shard %s is already closed.\n", id)
+			return nil
+		}
+
+		err = cpClient.UpdateShardStatus(ctx, id, "closed")
+		if err != nil {
+			return err
+		}
+
+		if outputFormat == "json" {
+			out := map[string]any{
+				"id":         id,
+				"status":     "closed",
+				"updated_at": time.Now().UTC().Format(time.RFC3339),
+			}
+			s, _ := client.FormatJSON(out)
+			fmt.Println(s)
+			return nil
+		}
+
+		fmt.Printf("Closed %s\n", id)
+		return nil
+	},
+}
+
+// -- shard reopen --
+
+var shardReopenCmd = &cobra.Command{
+	Use:     "reopen <shard-id>",
+	Short:   "Reopen a closed shard",
+	Args:    cobra.ExactArgs(1),
+	Example: "  cp shard reopen pf-abc123",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		id := args[0]
+
+		// Check current status
+		shard, err := cpClient.GetShard(ctx, id)
+		if err != nil {
+			return fmt.Errorf("Shard %s not found", id)
+		}
+		if shard.Status == "open" {
+			fmt.Printf("Shard %s is already open.\n", id)
+			return nil
+		}
+
+		err = cpClient.UpdateShardStatus(ctx, id, "open")
+		if err != nil {
+			return err
+		}
+
+		if outputFormat == "json" {
+			out := map[string]any{
+				"id":         id,
+				"status":     "open",
+				"updated_at": time.Now().UTC().Format(time.RFC3339),
+			}
+			s, _ := client.FormatJSON(out)
+			fmt.Println(s)
+			return nil
+		}
+
+		fmt.Printf("Reopened %s\n", id)
 		return nil
 	},
 }
@@ -334,11 +677,25 @@ func init() {
 
 	// shard create flags
 	shardCreateCmd.Flags().String("title", "", "Shard title (required)")
-	shardCreateCmd.Flags().String("type", "", "Shard type")
-	shardCreateCmd.Flags().String("content", "", "Shard content")
+	shardCreateCmd.Flags().String("type", "", "Shard type (required)")
+	shardCreateCmd.Flags().String("body", "", "Inline content")
+	shardCreateCmd.Flags().String("body-file", "", "Content from file")
+	shardCreateCmd.Flags().String("label", "", "Comma-separated labels")
 	shardCreateCmd.Flags().String("meta", "", "Metadata as JSON")
-	shardCreateCmd.Flags().Int("priority", 0, "Priority (0-4)")
-	shardCreateCmd.Flags().StringSlice("label", nil, "Labels (repeatable)")
+
+	// shard list flags
+	shardListCmd.Flags().String("type", "", "Comma-separated shard types")
+	shardListCmd.Flags().String("status", "", "Comma-separated statuses")
+	shardListCmd.Flags().String("label", "", "Comma-separated labels (OR)")
+	shardListCmd.Flags().String("creator", "", "Filter by creator")
+	shardListCmd.Flags().String("search", "", "Text search (tsvector)")
+	shardListCmd.Flags().String("since", "", "Time filter: duration or date")
+	shardListCmd.Flags().Int("offset", 0, "Skip N results for pagination")
+
+	// shard update flags
+	shardUpdateCmd.Flags().String("body", "", "New content (inline)")
+	shardUpdateCmd.Flags().String("body-file", "", "New content (from file)")
+	shardUpdateCmd.Flags().String("title", "", "New title")
 
 	// Wire command tree
 	shardMetadataCmd.AddCommand(shardMetadataGetCmd)
@@ -348,6 +705,11 @@ func init() {
 	shardCmd.AddCommand(shardMetadataCmd)
 	shardCmd.AddCommand(shardQueryCmd)
 	shardCmd.AddCommand(shardCreateCmd)
+	shardCmd.AddCommand(shardListCmd)
+	shardCmd.AddCommand(shardShowCmd)
+	shardCmd.AddCommand(shardUpdateCmd)
+	shardCmd.AddCommand(shardCloseCmd)
+	shardCmd.AddCommand(shardReopenCmd)
 
 	rootCmd.AddCommand(shardCmd)
 }

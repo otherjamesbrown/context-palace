@@ -44,8 +44,12 @@ COMMANDS:
   knowledge create|list|show|update|     Knowledge documents
             append|history|diff
   recall "query"                         Semantic search
+  shard list|show|create|update|         Shard operations
+        close|reopen
+  shard edges|link|unlink                Edge navigation & management
+  shard label add|remove|list            Label management
   shard metadata get|set|delete          Shard metadata ops
-  shard query|create                     Shard query & create
+  shard query                            Query by metadata
   admin embed-backfill                   Backfill embeddings
 
 CONFIGURATION:
