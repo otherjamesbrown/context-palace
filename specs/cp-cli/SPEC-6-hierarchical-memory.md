@@ -59,7 +59,21 @@ parent memory (pf-aa1)
         ├── parent_id: pf-aa1
         ├── content: "...child text..."
         └── child-of edge: pf-aa2 → pf-aa1
+              └── edge metadata: {"summary": "If deploy succeeds but service unchanged"}
 ```
+
+### Summary Storage (Dual Write)
+
+Trigger-phrase summaries are stored in **two places**:
+
+1. **Parent's sub-memories pointer block** (in `shards.content`) — for inline agent
+   navigation. Agents read the parent content and see the summaries in-context.
+2. **`child-of` edge metadata** (in `edges.metadata` JSONB) — for SQL-queryable access.
+   `memory_tree()` joins edges to return summaries without parsing content.
+
+Both are written in the same transaction. The pointer block is the primary agent-facing
+interface. The edge metadata enables efficient tree queries. `cp memory sync` reconciles
+both if they drift.
 
 ### Sub-Memory Pointer Block
 
@@ -159,6 +173,16 @@ weekly review.
 6. **WHAT decisions does it inform?** Agent navigation — which sub-memories to load. Trigger summaries tell the agent WHEN they'd need the child.
 7. **DOES it go stale?** Yes — if edges/parent_id are modified without updating the pointer block (e.g., external SQL manipulation). `cp memory sync` is the safety net.
 
+#### Summary in edge metadata (child-of edge)
+
+1. **WHO writes it?** `cp memory add-sub` (creates edge with summary), `cp memory move` (deletes old edge, creates new with same summary), `cp memory promote` (same as move), `cp memory sync` (reconciles).
+2. **WHEN is it written?** On child creation, move, promote, or sync. Always in the same transaction as the pointer block update.
+3. **WHERE is it stored?** `edges.metadata` JSONB on the `child-of` edge: `{"summary": "trigger phrase"}`.
+4. **WHO reads it?** `memory_tree()` SQL function (LEFT JOIN edges), `cp memory tree`, `cp memory hot`.
+5. **HOW is it queried?** `e.metadata->>'summary'` via LEFT JOIN in `memory_tree()`. SQL-queryable without parsing content.
+6. **WHAT decisions does it inform?** Tree display with summaries, JSON API output. Avoids Go-side content parsing for tree queries.
+7. **DOES it go stale?** Can drift from the pointer block if one is updated without the other. Both are always written in the same transaction, so drift only occurs from external SQL manipulation. `cp memory sync` reconciles both.
+
 #### Access telemetry (in shard metadata)
 
 1. **WHO writes it?** `memory_touch()` SQL function, called by `cp memory show`.
@@ -198,6 +222,48 @@ the reader's `cp memory show` may fail with "not found." This is expected behavi
 The hardest part of this system is writing good summaries. Bad summaries make
 child memories invisible — the agent won't know to follow the link. The `add-sub`
 command uses AI to generate the summary and optionally update the parent.
+
+### AI Provider
+
+Summary generation uses **Google Gemini (gemini-2.0-flash)** — the same vendor as
+the embedding provider, reusing the existing `GOOGLE_API_KEY`. Flash is cheap and
+fast enough for trigger-phrase summaries.
+
+**Config** (in `~/.cp/config.yaml`, alongside the existing `embedding:` section):
+
+```yaml
+embedding:
+  provider: google
+  model: gemini-embedding-001
+  api_key_env: GOOGLE_API_KEY
+
+generation:
+  provider: google
+  model: gemini-2.0-flash
+  api_key_env: GOOGLE_API_KEY   # Same key as embedding
+```
+
+**Interface** (new `Generator` in `internal/generation/` — separate from embedding):
+
+```go
+// Generator generates text from a prompt using an LLM.
+type Generator interface {
+    Generate(ctx context.Context, prompt string) (string, error)
+}
+
+type GenerationConfig struct {
+    Provider  string `yaml:"provider"`   // "google"
+    Model     string `yaml:"model"`      // "gemini-2.0-flash"
+    APIKeyEnv string `yaml:"api_key_env"`
+}
+```
+
+Do not unify with the embedding `Provider` interface — embedding and generation are
+different shapes. One interface, one Google implementation, no extra abstraction.
+
+**Timeout/retry:** 30-second timeout, no retry on failure. If summary generation
+fails, the `add-sub` command fails — don't create a child with no summary. The
+user can retry, or use `--no-ai --summary "..."` to bypass.
 
 ### Workflow
 
@@ -375,23 +441,35 @@ cp memory add-sub <parent-id> --title "Troubleshooting" \
 | `--auto-approve` | No | false | Accept AI suggestion without interactive review |
 | `-o` | No | text | Output format: text, json |
 
-**What it does (atomic):**
+**What it does:**
+
+Pre-transaction (no locks held):
 1. Verify parent exists and is type 'memory'. Error if not.
 1b. Check parent depth (via `memory_path()`). If depth >= 5, warn: "This memory will be
    at depth N. Deep hierarchies increase access latency. Continue? (y/n)". Skip in `--auto-approve`.
 2. Read child content from `--body` or `--body-file`. Error if neither.
 3. If `--no-ai` and no `--summary`, error: "--summary required when using --no-ai."
-4. If not `--no-ai`: call AI to generate trigger summary and parent review suggestion.
+4. If not `--no-ai`: call AI (Gemini Flash, 30s timeout) to generate trigger summary
+   and parent review suggestion.
 5. If not `--auto-approve` and not `--no-ai`: present for interactive approval. Display
    parent edit suggestion for informational purposes (never auto-applied).
 6. If `--auto-approve`: accept AI summary, discard parent edit suggestion silently.
-7. In a transaction:
+7. Generate embedding for child content (HTTP to Gemini embedding API).
+
+Atomic transaction:
+8. In a transaction:
    a. `SELECT ... FOR UPDATE` on parent shard (prevents concurrent pointer block corruption)
-   b. Create child shard (type=memory, parent_id=parent)
-   c. Generate embedding for child content
-   d. Create `child-of` edge from child to parent
+   b. Create child shard via `tx.QueryRow(ctx, "SELECT create_shard($1,...)", ...)` — call
+      the `create_shard()` SQL function directly on the transaction handle
+   c. Store pre-computed embedding on child shard
+   d. Create `child-of` edge from child to parent, with summary in edge metadata:
+      `{"summary": "trigger phrase here"}`
    e. Append entry to parent's sub-memories JSON block
-8. Return child shard ID.
+9. Return child shard ID.
+
+**Why embedding is outside the transaction:** Embedding requires an HTTP call to
+Google's API. Holding a `FOR UPDATE` lock during an external call risks lock contention
+and timeouts. Pre-computing the embedding keeps the transaction fast (SQL only).
 
 **Output (text):**
 ```
@@ -488,11 +566,12 @@ cp memory move <id> --root
    and check if this memory's ID appears). Error "Cannot move to own descendant (would create cycle)."
 3. `SELECT ... FOR UPDATE` on all affected parent shards (old parent, new parent).
    Lock in shard ID order to prevent deadlocks.
-4. Remove entry from old parent's sub-memories block
-5. Add entry (with existing summary) to new parent's sub-memories block
-6. Update shard's `parent_id`
-7. Update `child-of` edge (remove old, create new)
-8. If `--root`, set parent_id to NULL and remove edge. Skip steps 5-7.
+4. Read existing summary from old parent's sub-memories block (preserve it for new parent)
+5. Remove entry from old parent's sub-memories block
+6. Add entry (with preserved summary) to new parent's sub-memories block
+7. Update shard's `parent_id`
+8. Delete old `child-of` edge, create new `child-of` edge with same summary in edge metadata
+9. If `--root`, set parent_id to NULL and remove edge. Skip steps 6-8.
 
 **Output (text):**
 ```
@@ -793,14 +872,17 @@ cp memory sync <parent-id>
 **What it does:**
 1. For each memory with children (via `parent_id`):
    - Read the sub-memories JSON block from content
+   - Read summaries from `child-of` edge metadata
    - Query actual children from the shards table
-   - Compare: missing entries, stale entries, orphaned entries
+   - Compare: missing entries, stale entries, orphaned entries, edge/pointer mismatches
 2. Report differences
-3. If not dry-run: regenerate the JSON block from actual children
-   - Preserves existing summaries where child still exists
+3. If not dry-run: regenerate the JSON block from actual children AND update edge metadata
+   - Preserves existing summaries where child still exists (prefers edge metadata as
+     source of truth if pointer block and edge disagree)
    - Removes entries for deleted children
    - Adds placeholder entries for children without summaries
      (summary = "No summary — update this memory's pointer block manually or re-add with add-sub")
+   - Ensures `child-of` edge metadata matches pointer block summary for each child
 
 **Output (text, dry-run with discrepancies):**
 ```
@@ -883,10 +965,58 @@ hierarchical view is `cp memory tree` (this spec).
 
 ## Database Changes
 
+### Migration File
+
+All SQL changes in this spec go into `cp/migrations/007_hierarchical_memory.sql`.
+
+### Amendment to `list_shards()` (SPEC-5)
+
+Add `p_parent_id_null BOOLEAN DEFAULT FALSE` parameter to the existing `list_shards()`
+function. When true, adds `AND s.parent_id IS NULL` to the WHERE clause. This keeps
+the `--roots` filter in SQL alongside the existing pagination, label, and type filters.
+
+```sql
+-- Add to existing list_shards() signature (append parameter):
+--   p_parent_id_null BOOLEAN DEFAULT FALSE
+-- Add to WHERE clause:
+--   AND (NOT p_parent_id_null OR s.parent_id IS NULL)
+CREATE OR REPLACE FUNCTION list_shards(
+    p_project TEXT,
+    p_types TEXT[] DEFAULT NULL,
+    p_status TEXT[] DEFAULT NULL,
+    p_labels TEXT[] DEFAULT NULL,
+    p_creator TEXT DEFAULT NULL,
+    p_search TEXT DEFAULT NULL,
+    p_since TIMESTAMPTZ DEFAULT NULL,
+    p_limit INT DEFAULT 50,
+    p_offset INT DEFAULT 0,
+    p_parent_id_null BOOLEAN DEFAULT FALSE  -- NEW: filter to root shards only
+) RETURNS TABLE (
+    id TEXT, title TEXT, type TEXT, status TEXT, creator TEXT,
+    labels TEXT[], created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ, snippet TEXT
+) AS $$
+    SELECT
+        s.id, s.title, s.type, s.status, s.creator,
+        s.labels, s.created_at, s.updated_at,
+        left(s.content, 200) AS snippet
+    FROM shards s
+    WHERE s.project = p_project
+      AND (p_types IS NULL OR s.type = ANY(p_types))
+      AND (p_status IS NULL OR s.status = ANY(p_status))
+      AND (p_labels IS NULL OR s.labels @> p_labels)
+      AND (p_creator IS NULL OR s.creator = p_creator)
+      AND (p_search IS NULL OR s.search_vector @@ plainto_tsquery('english', p_search))
+      AND (p_since IS NULL OR s.created_at >= p_since)
+      AND (NOT p_parent_id_null OR s.parent_id IS NULL)
+    ORDER BY s.created_at DESC
+    LIMIT p_limit OFFSET p_offset;
+$$ LANGUAGE sql STABLE;
+```
+
 ### SQL Functions
 
 ```sql
--- Get memory tree (recursive)
+-- Get memory tree (recursive), with summary from child-of edge metadata
 CREATE OR REPLACE FUNCTION memory_tree(
     p_project TEXT,
     p_root_id TEXT DEFAULT NULL  -- NULL = all roots
@@ -899,7 +1029,8 @@ CREATE OR REPLACE FUNCTION memory_tree(
     labels TEXT[],
     access_count INT,
     last_accessed TIMESTAMPTZ,
-    child_count INT
+    child_count INT,
+    summary TEXT  -- from child-of edge metadata (NULL for roots)
 ) AS $$
     WITH RECURSIVE tree AS (
         -- Base case: root memories (or specific root)
@@ -935,8 +1066,12 @@ CREATE OR REPLACE FUNCTION memory_tree(
         COALESCE((t.metadata->>'access_count')::int, 0),
         (t.metadata->>'last_accessed')::timestamptz,
         (SELECT count(*) FROM shards c
-         WHERE c.parent_id = t.id AND c.type = 'memory' AND c.status != 'closed')::int
+         WHERE c.parent_id = t.id AND c.type = 'memory' AND c.status != 'closed')::int,
+        e.metadata->>'summary'  -- NULL for roots (no child-of edge)
     FROM tree t
+    LEFT JOIN edges e ON e.from_id = t.id
+                     AND e.to_id = t.parent_id
+                     AND e.edge_type = 'child-of'
     ORDER BY t.depth, t.created_at;
 $$ LANGUAGE sql STABLE;
 
@@ -1114,12 +1249,15 @@ cp/
     ├── client/
     │   ├── memory_hierarchy.go # Tree queries, parent_id ops
     │   └── memory_telemetry.go # Touch, access log
+    ├── generation/
+    │   ├── generator.go        # Generator interface + GenerationConfig
+    │   └── google.go           # GoogleGenerator (gemini-2.0-flash)
     ├── pointer/
     │   ├── parse.go            # Parse sub-memories block from content
-    │   ├── render.go           # Render pointer block for display
+    │   ├── render.go           # Render pointer block + renderWithBlock
     │   └── update.go           # Add/remove entries in block
     └── summary/
-        └── generate.go         # AI summary generation + parent review
+        └── generate.go         # AI summary prompt building + response parsing
 ```
 
 ### Pointer Block Parser
@@ -1189,12 +1327,24 @@ func RemoveSubMemory(content string, childID string) (string, error) {
     }
     return renderWithBlock(mainContent, filtered)
 }
+
+// renderWithBlock serializes entries as indented JSON and wraps in delimiters.
+func renderWithBlock(mainContent string, entries []SubMemoryEntry) (string, error) {
+    jsonBytes, err := json.MarshalIndent(entries, "", "  ")
+    if err != nil {
+        return "", fmt.Errorf("failed to serialize sub-memories: %w", err)
+    }
+    return fmt.Sprintf("%s\n\n%s\n%s\n%s\n",
+        mainContent, SubMemoryStart, string(jsonBytes), SubMemoryEnd), nil
+}
 ```
 
 ### Add-Sub Flow
 
 ```go
 func AddSubMemory(ctx context.Context, parentID string, opts AddSubOpts) (string, error) {
+    // === Pre-transaction: validation, AI, embedding (no locks held) ===
+
     // 1. Load parent memory
     parent, err := GetShard(ctx, parentID)
     if err != nil {
@@ -1209,55 +1359,63 @@ func AddSubMemory(ctx context.Context, parentID string, opts AddSubOpts) (string
     if opts.Summary != "" {
         summary = opts.Summary  // Manual, skip AI
     } else {
-        result, err := generateSummary(ctx, parent, opts.Title, opts.Body)
+        result, err := generator.Generate(ctx, buildSummaryPrompt(parent, opts.Title, opts.Body))
         if err != nil {
             return "", fmt.Errorf("summary generation failed: %w", err)
         }
-        summary = result.Summary
+        parsed, err := parseSummaryResponse(result)
+        if err != nil {
+            return "", fmt.Errorf("failed to parse AI response: %w", err)
+        }
+        summary = parsed.Summary
 
         if !opts.AutoApprove {
-            // Present for interactive approval (parent edits shown as suggestion only)
-            approved, editedSummary := promptApproval(result)
+            approved, editedSummary := promptApproval(parsed)
             if !approved {
                 return "", fmt.Errorf("cancelled by user")
             }
             summary = editedSummary
         }
-        // Note: result.ParentEdits is displayed in the prompt but never applied.
-        // The user can manually edit the parent afterward if the suggestion is useful.
+        // Note: parsed.ParentEdits is displayed in the prompt but never applied.
     }
 
-    // 3. Atomic commit (transaction)
+    // 3. Pre-compute embedding (HTTP call — outside transaction)
+    embeddingText := embedding.BuildEmbeddingText("memory", opts.Title, opts.Body)
+    vector, _ := embeddingProvider.Embed(ctx, embeddingText)
+
+    // === Atomic transaction: all SQL, no HTTP calls ===
+
     tx, err := db.Begin(ctx)
 
-    // 3a. Lock parent shard (FOR UPDATE prevents concurrent pointer block corruption)
+    // 4a. Lock parent shard (FOR UPDATE prevents concurrent pointer block corruption)
     parent, err = getShardForUpdate(tx, parentID)
 
-    // 3b. Create child shard
-    childID, err := createShard(tx, CreateShardOpts{
-        Project:  parent.Project,
-        Type:     "memory",
-        Title:    opts.Title,
-        Content:  opts.Body,
-        Creator:  config.Agent,
-        Labels:   opts.Labels,
-        ParentID: &parentID,
-    })
+    // 4b. Create child shard — call create_shard() SQL directly on tx
+    var childID string
+    err = tx.QueryRow(ctx,
+        "SELECT create_shard($1, $2, $3, $4, 'memory', $5, $6, NULL, NULL)",
+        parent.Project, config.Agent, opts.Title, opts.Body, opts.Labels, parentID,
+    ).Scan(&childID)
 
-    // 3c. Generate and store embedding
-    embedding, _ := embeddingProvider.Embed(ctx, opts.Body)
-    storeEmbedding(tx, childID, embedding)
+    // 4c. Store pre-computed embedding
+    _, err = tx.Exec(ctx,
+        "UPDATE shards SET embedding = $1 WHERE id = $2", vector, childID)
 
-    // 3d. Create child-of edge
-    createEdge(tx, childID, parentID, "child-of")
+    // 4d. Create child-of edge with summary in metadata
+    edgeMeta := fmt.Sprintf(`{"summary": %s}`, jsonQuote(summary))
+    _, err = tx.Exec(ctx,
+        "INSERT INTO edges (from_id, to_id, edge_type, metadata) VALUES ($1, $2, 'child-of', $3::jsonb)",
+        childID, parentID, edgeMeta)
 
-    // 3e. Update parent content (add pointer only — parent prose edits are suggestion-only)
+    // 4e. Update parent content (add pointer block entry)
     parentContent, _ := AppendSubMemory(parent.Content, SubMemoryEntry{
         ID:      childID,
         Title:   opts.Title,
         Summary: summary,
     })
-    updateShardContent(tx, parentID, parentContent)
+    _, err = tx.Exec(ctx,
+        "UPDATE shards SET content = $1, updated_at = now() WHERE id = $2",
+        parentContent, parentID)
 
     tx.Commit()
     return childID, nil
@@ -1836,6 +1994,21 @@ TEST: add-sub deep nesting warning
    but never auto-applied. Skipped silently in `--auto-approve` mode. No diff/patch logic needed.
 3. **`cp memory list` default:** Shows all memories (root and child) in flat list. `--roots`
    flag added to SPEC-5 to filter to root-level only. `cp memory tree` for hierarchical view.
+4. **AI provider for summary generation:** Google Gemini (gemini-2.0-flash), reusing the
+   existing `GOOGLE_API_KEY`. New `Generator` interface in `internal/generation/` — separate
+   from embedding (different shapes). 30s timeout, no retry on failure.
+5. **Transaction scope:** Embedding and AI summary generation happen *before* the transaction.
+   The transaction only contains SQL operations (FOR UPDATE, create_shard, store embedding,
+   create edge, update pointer block). Minimizes lock hold time.
+6. **Transaction-aware shard creation:** Call `create_shard()` SQL function directly on the
+   `pgx.Tx` handle via `tx.QueryRow()`. No Go-side `CreateShardInTx()` wrapper needed.
+7. **`--roots` filter:** New `p_parent_id_null BOOLEAN DEFAULT FALSE` parameter on `list_shards()`.
+   Keeps filtering in SQL alongside existing pagination/label/type filters.
+8. **Summary storage (dual write):** Summaries stored in both the parent's pointer block (for
+   agent in-context navigation) and the `child-of` edge metadata (for SQL-queryable tree
+   display). `memory_tree()` LEFT JOINs edges to return summaries. `cp memory sync` reconciles both.
+9. **CASCADE delete:** Confirmed — `edges.from_id` and `edges.to_id` both have `ON DELETE CASCADE`.
+   Deleting a shard automatically removes its edges. No explicit edge deletion needed.
 
 ---
 
@@ -1850,5 +2023,6 @@ TEST: add-sub deep nesting warning
 - [x] No feature is "mentioned but not specced" (pointer block format, telemetry, all commands)
 - [x] Edge cases cover: invalid input, empty state, conflicts, boundaries, cross-feature, failure recovery
 - [x] Existing spec interactions documented (Cross-Spec Interactions table)
-- [x] Open design questions resolved (3 items — see Design Decisions)
+- [x] Open design questions resolved (9 items — see Design Decisions)
 - [x] Sub-agent review completed (25 items: 3 High, 10 Medium, 12 Low — all fixed)
+- [x] Implementation review completed (5 questions resolved: AI provider, transaction design, --roots SQL, tree summaries, CASCADE)

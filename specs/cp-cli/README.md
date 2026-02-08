@@ -1,20 +1,53 @@
-# `cp` CLI Specs — Implementation Guide
+# Context Palace — `cp` CLI Specs
 
-## What is this?
+## If you are an AI agent, read this first
 
-`cp` is the CLI for Context Palace — a project-agnostic platform for shard management,
-semantic search, agent memory, requirements tracking, and work coordination. It is
-**separate from `penf`** (Penfold-specific operations). `cp` is reusable across any project.
+Context Palace is the infrastructure you run on. It provides five core capabilities:
 
-These specs define everything needed to build `cp`. Each spec is self-contained: it has
-the data model, SQL functions (complete — not pseudocode), CLI commands with exact output
-formats, success criteria, edge cases, and test cases.
+1. **Work management** — Bugs, features, and specs are tracked as shards. Shards are
+   grouped into epics. You assign shards when you start work, close them when you finish.
+   The system tracks what's in progress, what's blocked, and what's next. (SPEC-3, SPEC-7)
 
-## Before you start implementing
+2. **Hierarchical memory** — Your knowledge base is a tree. Root memories give you
+   orientation. Sub-memories hold detail you load on demand. When you learn something,
+   you store it as a sub-memory with a trigger summary so future agents (or future you
+   after a context clear) know when to load it. (SPEC-6)
+
+3. **Inter-agent messaging** — You communicate with other agents and humans through
+   message shards. Messages are targeted via `to:agent-name` labels, read via inbox
+   queries, and acknowledged via read receipts. This is how you receive work, report
+   status, and ask questions. (See [agent-protocols.md](../agent-protocols.md))
+
+4. **Semantic search** — You can search shards by meaning, not just keywords. Shards
+   are embedded on creation (pgvector). `cp recall "deployment issues"` finds relevant
+   memories, docs, and messages regardless of exact wording. (SPEC-1, SPEC-5)
+
+5. **Versioned knowledge documents** — Reference documentation (architecture docs,
+   runbooks, specs) is stored as versioned shards with diffs between versions.
+   When a doc is updated, the previous version is preserved. (SPEC-4)
+
+Everything is a **shard** — a row in PostgreSQL with a type, status, labels, metadata,
+optional parent, and optional vector embedding. Shards are connected by typed **edges**
+(blocked-by, child-of, implements, etc.) forming a graph. The `cp` CLI is how you
+interact with all of it.
+
+**`cp` is separate from `penf`.** `penf` handles Penfold-specific operations (email
+pipeline, entities, acronyms). `cp` is project-agnostic infrastructure — reusable
+across any project that needs work tracking, memory, or agent coordination.
+
+---
+
+## Specs in this directory
+
+These specs define everything needed to build `cp`. Each spec is self-contained: data
+model, SQL functions (complete — not pseudocode), CLI commands with exact output formats,
+success criteria, edge cases, and test cases.
+
+### Before you start implementing
 
 1. Read the spec you're assigned — the whole thing, not just the summary
 2. Read its dependencies (listed at the top of each spec)
-3. Check the schema reference files below — they define what already exists
+3. Read [postgres-schema.md](../postgres-schema.md) — it defines what already exists
 4. Follow the spec exactly. If something seems wrong, flag it — don't silently deviate
 
 ## Specs
@@ -98,14 +131,58 @@ Each spec contains:
 - **Edge cases** — table of inputs and expected behavior
 - **Test cases** — SQL tests, Go unit tests, integration tests
 
-## How SPEC-7 changes the workflow
+## How agents use this system
 
-SPEC-7 (Shard Lifecycle) introduces work tracking that agents **must** follow:
+### Memory (SPEC-6)
+
+Agent knowledge lives in hierarchical memory. Root memories provide orientation;
+sub-memories hold detail that's loaded on demand.
+
+- **On startup:** load root memories (`cp memory list --roots`). Read their
+  sub-memory pointer blocks to understand what detail is available.
+- **When you need detail:** follow a pointer — `cp memory show <child-id>`.
+  Only load what you need. Every read is tracked (access telemetry).
+- **When you learn something new:** store it as a sub-memory under the right
+  parent — `cp memory add-sub <parent-id> --title "..." --body "..."`. The
+  system generates a trigger summary ("when would you need this?") that helps
+  future agents find it.
+- **Pointer block format** in parent content:
+  ```
+  <!-- sub-memories -->
+  [
+    {"id": "pf-aa2", "title": "Troubleshooting", "summary": "If deploy succeeds but service unchanged"},
+    {"id": "pf-aa5", "title": "Rollback", "summary": "Steps to revert a bad deploy"}
+  ]
+  <!-- /sub-memories -->
+  ```
+  The summaries describe *when* to load the child, not just *what* it contains.
+- **Navigation:** `cp memory tree` shows the full hierarchy. `cp memory hot`
+  shows frequently-accessed deep memories that should be promoted upward.
+
+### Work tracking (SPEC-7)
+
+Shard lifecycle tracking that agents **must** follow:
 
 1. When you pick up a shard to implement: `cp shard assign <id>`
 2. When you finish: `cp shard close <id> --reason "Done: ..."`
 3. When decomposing HIGH items: create an epic, set `parent_id` on sub-shards
 4. Add `kind:bug` or `kind:feature` labels to all work shards
+5. Check what to work on next: `cp shard next`
+6. See current state: `cp shard board` or `cp epic show <id>`
 
 This is not optional. Shards that are worked on but not assigned/closed create
 invisible work that nobody can track.
+
+### Focus
+
+Focus is a persistent "active epic" that scopes queries and survives context clears.
+
+```bash
+cp focus set <epic-id>       # "I'm working on this epic"
+cp focus                     # show current epic + progress
+cp shard next                # next unblocked shard within focused epic
+cp shard board               # kanban view scoped to focused epic
+```
+
+When a human asks "what are we working on?" or "what's next?", the focus
+and shard state are the source of truth — not the conversation history.
