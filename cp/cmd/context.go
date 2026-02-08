@@ -166,7 +166,7 @@ var contextMorningCmd = &cobra.Command{
 			}
 			fmt.Println()
 		} else {
-			fmt.Println("--- No unread messages ---\n")
+			fmt.Println("--- No unread messages ---")
 		}
 
 		// Open tasks
