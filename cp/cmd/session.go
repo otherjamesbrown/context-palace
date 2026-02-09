@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/otherjamesbrown/context-palace/cp/internal/client"
@@ -91,6 +92,14 @@ var sessionShowCmd = &cobra.Command{
 			session, err = cpClient.GetCurrentSession(ctx)
 		}
 		if err != nil {
+			if errors.Is(err, client.ErrNoSession) {
+				if outputFormat == "json" {
+					fmt.Println(`{"session": null}`)
+				} else {
+					fmt.Println("No open session.")
+				}
+				return nil
+			}
 			return err
 		}
 

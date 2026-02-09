@@ -2,9 +2,15 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
+
+// ErrNoSession is returned when no open session exists (a valid state, not a real error).
+var ErrNoSession = errors.New("no open session found")
 
 // Session represents a work session
 type Session struct {
@@ -108,8 +114,11 @@ func (c *Client) GetCurrentSession(ctx context.Context) (*Session, error) {
 		ORDER BY created_at DESC LIMIT 1
 	`, c.Config.Project, c.Config.Agent).Scan(
 		&s.ID, &s.Title, &s.Content, &s.Status, &s.CreatedAt, &s.UpdatedAt)
+	if err == pgx.ErrNoRows {
+		return nil, ErrNoSession
+	}
 	if err != nil {
-		return nil, fmt.Errorf("no open session found")
+		return nil, fmt.Errorf("failed to query session: %v", err)
 	}
 	return &s, nil
 }
