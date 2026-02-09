@@ -173,22 +173,51 @@ var messageShowCmd = &cobra.Command{
 
 var messageReadCmd = &cobra.Command{
 	Use:     "read <shard-id> [shard-id...]",
-	Short:   "Mark messages as read",
+	Short:   "Read messages and mark as read",
 	Args:    cobra.MinimumNArgs(1),
 	Example: "  cp message read pf-abc123 pf-def456",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
+
+		// Fetch and display each message
+		var messages []*client.Message
+		for _, id := range args {
+			msg, err := cpClient.GetMessage(ctx, id)
+			if err != nil {
+				return fmt.Errorf("fetching message %s: %w", id, err)
+			}
+			messages = append(messages, msg)
+		}
+
+		// Mark all as read
 		count, err := cpClient.MarkRead(ctx, args)
 		if err != nil {
 			return err
 		}
 
 		if outputFormat == "json" {
-			fmt.Printf(`{"marked_read": %d}`+"\n", count)
+			type readResult struct {
+				Messages  []*client.Message `json:"messages"`
+				MarkedRead int             `json:"marked_read"`
+			}
+			s, _ := client.FormatJSON(readResult{Messages: messages, MarkedRead: count})
+			fmt.Println(s)
 			return nil
 		}
 
-		fmt.Printf("Marked %d message(s) as read\n", count)
+		for i, msg := range messages {
+			if i > 0 {
+				fmt.Println("---")
+			}
+			fmt.Printf("ID:      %s\n", msg.ID)
+			fmt.Printf("From:    %s\n", msg.Creator)
+			fmt.Printf("Date:    %s\n", msg.CreatedAt.Format("2006-01-02 15:04:05"))
+			fmt.Printf("Subject: %s\n", msg.Title)
+			if msg.Content != "" {
+				fmt.Printf("\n%s\n", msg.Content)
+			}
+		}
+		fmt.Printf("\nMarked %d message(s) as read\n", count)
 		return nil
 	},
 }
