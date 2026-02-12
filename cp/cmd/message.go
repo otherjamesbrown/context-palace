@@ -43,6 +43,17 @@ var messageSendCmd = &cobra.Command{
 			stdinReader = os.Stdin
 		}
 
+		// Pre-flight validation: if user provides exactly 2 args with no --body flag
+		// and no stdin detected, fail immediately with clear error instead of blocking
+		if len(args) == 2 && flagBody == "" && stdinReader == nil {
+			return fmt.Errorf("message body is required: provide as 3rd argument, --body flag, or pipe to stdin")
+		}
+
+		// Warn if subject is suspiciously long (might have been intended as body)
+		if len(subject) > 100 {
+			fmt.Fprintf(os.Stderr, "Warning: subject is very long (%d chars). Did you mean to provide this as body?\n", len(subject))
+		}
+
 		body, err := resolveMessageBody(positionalBody, flagBody, stdinReader)
 		if err != nil {
 			return err
