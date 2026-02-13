@@ -71,6 +71,26 @@ func (c *Client) CreateKnowledgeDoc(ctx context.Context, title, content, docType
 	return c.CreateShardWithMetadata(ctx, title, content, "knowledge", nil, labels, json.RawMessage(metaJSON))
 }
 
+// CreateKnowledgeDocWithID creates a new knowledge document with a custom ID
+func (c *Client) CreateKnowledgeDocWithID(ctx context.Context, customID, title, content, docType string, labels []string) (string, error) {
+	if customID == "" {
+		return "", fmt.Errorf("custom ID cannot be empty")
+	}
+
+	meta := map[string]any{
+		"doc_type":            docType,
+		"version":             1,
+		"last_changed_by":     c.Config.Agent,
+		"last_change_summary": "Initial document",
+	}
+	metaJSON, err := json.Marshal(meta)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal metadata: %v", err)
+	}
+
+	return c.CreateShardWithMetadataAndID(ctx, customID, title, content, "knowledge", nil, labels, json.RawMessage(metaJSON))
+}
+
 // ListKnowledgeDocs lists knowledge documents with optional doc_type and label filters
 func (c *Client) ListKnowledgeDocs(ctx context.Context, docTypeFilter string, labelFilter string, limit int) ([]KnowledgeDoc, error) {
 	conn, err := c.Connect(ctx)

@@ -256,6 +256,36 @@ func (c *Client) CreateShardWithMetadata(ctx context.Context, title, content, sh
 	return newID, nil
 }
 
+// CreateShardWithMetadataAndID creates a new shard with metadata and a custom ID, and returns its ID
+func (c *Client) CreateShardWithMetadataAndID(ctx context.Context, customID, title, content, shardType string, priority *int, labels []string, metadata json.RawMessage) (string, error) {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close(ctx)
+
+	if labels == nil {
+		labels = []string{}
+	}
+	if metadata == nil {
+		metadata = json.RawMessage("{}")
+	}
+
+	var newID string
+	err = conn.QueryRow(ctx, `
+		SELECT create_shard($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+	`, c.Config.Project, c.Config.Agent, title, content, shardType,
+		labels, nil, priority, metadata, customID).Scan(&newID)
+	if err != nil {
+		return "", fmt.Errorf("failed to create shard: %v", err)
+	}
+
+	// Embed-on-write: synchronous, non-fatal
+	c.tryEmbed(ctx, newID, shardType, title, content)
+
+	return newID, nil
+}
+
 // UpdateShardContent updates a shard's content
 func (c *Client) UpdateShardContent(ctx context.Context, id, content string) error {
 	conn, err := c.Connect(ctx)

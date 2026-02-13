@@ -44,8 +44,16 @@ var kdCreateCmd = &cobra.Command{
 		}
 
 		labels, _ := cmd.Flags().GetStringSlice("label")
+		customID, _ := cmd.Flags().GetString("id")
 
-		id, err := cpClient.CreateKnowledgeDoc(ctx, title, content, docType, labels)
+		var id string
+		if customID != "" {
+			// Use custom ID
+			id, err = cpClient.CreateKnowledgeDocWithID(ctx, customID, title, content, docType, labels)
+		} else {
+			// Auto-generate ID
+			id, err = cpClient.CreateKnowledgeDoc(ctx, title, content, docType, labels)
+		}
 		if err != nil {
 			return err
 		}
@@ -407,6 +415,7 @@ func init() {
 	kdCreateCmd.Flags().String("body", "", "Document content (inline)")
 	kdCreateCmd.Flags().String("body-file", "", "Read document content from file")
 	kdCreateCmd.Flags().StringSlice("label", nil, "Labels (repeatable)")
+	kdCreateCmd.Flags().String("id", "", "Custom ID/slug for the document (optional, auto-generated if omitted)")
 
 	// list flags
 	kdListCmd.Flags().String("doc-type", "", "Filter by document type")
