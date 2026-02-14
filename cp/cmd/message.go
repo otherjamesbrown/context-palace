@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/otherjamesbrown/context-palace/cp/internal/client"
 	"github.com/spf13/cobra"
@@ -18,24 +19,52 @@ var messageCmd = &cobra.Command{
 }
 
 var messageSendCmd = &cobra.Command{
-	Use:   "send <recipient> <subject> [body]",
+	Use:   "send [recipient] [subject] [body]",
 	Short: "Send a message",
-	Args:  cobra.RangeArgs(2, 3),
+	Args:  cobra.RangeArgs(0, 3),
 	Example: `  cp message send agent-mycroft "Subject" "Short body"
+  cp message send --recipient agent-mycroft --subject "Subject" --body "Body"
   cp message send agent-mycroft "Bug found" --body "Details here" --kind bug-report
   cp message send agent-mycroft "Re: Bug" --body "Looking into it" --reply-to pf-abc123
   echo "Long body" | cp message send agent-mycroft "Subject"`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
-		recipients := strings.Split(args[0], ",")
-		subject := args[1]
+		flagRecipient, _ := cmd.Flags().GetString("recipient")
+		flagSubject, _ := cmd.Flags().GetString("subject")
+		flagBody, _ := cmd.Flags().GetString("body")
+
+		// Resolve recipient: positional arg takes precedence over flag
+		var recipientStr string
+		switch {
+		case len(args) >= 1 && flagRecipient != "":
+			return fmt.Errorf("cannot specify both positional recipient and --recipient flag")
+		case len(args) >= 1:
+			recipientStr = args[0]
+		case flagRecipient != "":
+			recipientStr = flagRecipient
+		default:
+			return fmt.Errorf("recipient is required: provide as 1st argument or --recipient flag")
+		}
+		recipients := strings.Split(recipientStr, ",")
+
+		// Resolve subject: positional arg takes precedence over flag
+		var subject string
+		switch {
+		case len(args) >= 2 && flagSubject != "":
+			return fmt.Errorf("cannot specify both positional subject and --subject flag")
+		case len(args) >= 2:
+			subject = args[1]
+		case flagSubject != "":
+			subject = flagSubject
+		default:
+			return fmt.Errorf("subject is required: provide as 2nd argument or --subject flag")
+		}
 
 		positionalBody := ""
 		if len(args) == 3 {
 			positionalBody = args[2]
 		}
-		flagBody, _ := cmd.Flags().GetString("body")
 
 		// Detect stdin: only read if not a terminal
 		var stdinReader io.Reader
@@ -43,9 +72,14 @@ var messageSendCmd = &cobra.Command{
 			stdinReader = os.Stdin
 		}
 
-		// Pre-flight validation: if user provides exactly 2 args with no --body flag
-		// and no stdin detected, fail immediately with clear error instead of blocking
-		if len(args) == 2 && flagBody == "" && stdinReader == nil {
+		// Pre-flight validation: if body is already provided via positional arg or flag,
+		// don't attempt stdin (prevents hanging in tmux/CI where stdin detection is unreliable)
+		if positionalBody != "" || flagBody != "" {
+			stdinReader = nil
+		}
+
+		// If no body source provided at all, fail immediately
+		if positionalBody == "" && flagBody == "" && stdinReader == nil {
 			return fmt.Errorf("message body is required: provide as 3rd argument, --body flag, or pipe to stdin")
 		}
 
@@ -103,15 +137,29 @@ func resolveMessageBody(positional, flag string, stdin io.Reader) (string, error
 		return flag, nil
 	}
 
-	// Try stdin
+	// Try stdin with a timeout to avoid hanging when os.Stdin.Stat() falsely
+	// reports a pipe (common in tmux/CI environments).
 	if stdin != nil {
-		data, err := io.ReadAll(stdin)
-		if err != nil {
-			return "", fmt.Errorf("reading stdin: %w", err)
+		type readResult struct {
+			data []byte
+			err  error
 		}
-		body := strings.TrimSpace(string(data))
-		if body != "" {
-			return body, nil
+		ch := make(chan readResult, 1)
+		go func() {
+			data, err := io.ReadAll(stdin)
+			ch <- readResult{data, err}
+		}()
+		select {
+		case res := <-ch:
+			if res.err != nil {
+				return "", fmt.Errorf("reading stdin: %w", res.err)
+			}
+			body := strings.TrimSpace(string(res.data))
+			if body != "" {
+				return body, nil
+			}
+		case <-time.After(100 * time.Millisecond):
+			// stdin detected but no data arrived — likely a false positive
 		}
 	}
 
@@ -234,6 +282,8 @@ var messageReadCmd = &cobra.Command{
 }
 
 func init() {
+	messageSendCmd.Flags().String("recipient", "", "Recipient agent(s) (comma-separated)")
+	messageSendCmd.Flags().String("subject", "", "Message subject")
 	messageSendCmd.Flags().String("body", "", "Message body")
 	messageSendCmd.Flags().String("cc", "", "CC recipients (comma-separated)")
 	messageSendCmd.Flags().String("kind", "", "Message kind (e.g., bug-report, feature-request)")
