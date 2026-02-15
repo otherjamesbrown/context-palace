@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 
+	"encoding/json"
+
 	"github.com/otherjamesbrown/context-palace/cp/internal/client"
 	"github.com/spf13/cobra"
 )
@@ -165,8 +167,18 @@ var kdShowCmd = &cobra.Command{
 			}
 		}
 
+		// Fetch children (fire-and-forget on error)
+		children, _ := cpClient.ListKnowledgeChildren(ctx, id)
+
 		if outputFormat == "json" {
-			s, _ := client.FormatJSON(doc)
+			// Build output map from doc, then add children
+			raw, _ := json.Marshal(doc)
+			var out map[string]any
+			json.Unmarshal(raw, &out)
+			if len(children) > 0 {
+				out["children"] = children
+			}
+			s, _ := client.FormatJSON(out)
 			fmt.Println(s)
 			return nil
 		}
@@ -199,6 +211,34 @@ var kdShowCmd = &cobra.Command{
 			fmt.Printf("Accessed: %s\n", accessStr)
 		}
 		fmt.Printf("\n%s\n", doc.Content)
+
+		// Render children block if any exist
+		if len(children) > 0 {
+			if outputFormat == "json" {
+				fmt.Println("\n--- children ---")
+				childJSON, _ := json.MarshalIndent(map[string]any{
+					"children": children,
+				}, "", "  ")
+				fmt.Println(string(childJSON))
+			} else {
+				fmt.Printf("\n--- Children (%d) ---\n\n", len(children))
+				for _, ch := range children {
+					fmt.Printf("  %s", ch.ID)
+					if ch.Title != "" {
+						fmt.Printf("  %s", ch.Title)
+					}
+					fmt.Println()
+					if ch.Description != "" {
+						fmt.Printf("    %s\n", ch.Description)
+					}
+					if ch.Trigger != "" {
+						fmt.Printf("    → %s\n", ch.Trigger)
+					}
+					fmt.Println()
+				}
+			}
+		}
+
 		return nil
 	},
 }

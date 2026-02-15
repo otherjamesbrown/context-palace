@@ -237,9 +237,10 @@ type ShardDetailResult struct {
 	Metadata          json.RawMessage `json:"metadata,omitempty"`
 	CreatedAt         time.Time       `json:"created_at"`
 	UpdatedAt         time.Time       `json:"updated_at"`
-	OutgoingEdgeCount int             `json:"outgoing_edge_count"`
-	IncomingEdgeCount int             `json:"incoming_edge_count"`
-	Edges             []EdgeInfo      `json:"edges,omitempty"`
+	OutgoingEdgeCount  int               `json:"outgoing_edge_count"`
+	IncomingEdgeCount  int               `json:"incoming_edge_count"`
+	Edges              []EdgeInfo        `json:"edges,omitempty"`
+	KnowledgeChildren  []KnowledgeChild  `json:"children,omitempty"`
 }
 
 // GetShardDetail fetches a shard with full detail (including edge counts)
