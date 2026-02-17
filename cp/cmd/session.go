@@ -189,24 +189,22 @@ var sessionBoardCmd = &cobra.Command{
 				if i > 0 {
 					fmt.Println()
 				}
-				fmt.Printf("%s (%d items, ~%s)\n", g.Area, len(g.Items), formatTokens(g.TotalTokens))
+				fmt.Printf("# Current Open %s (%d items, ~%s) #\n\n",
+					strings.ToUpper(g.Type+"s"), len(g.Items), formatTokens(g.TotalTokens))
 				for _, e := range g.Items {
 					priority := ""
 					if e.Priority != nil {
 						switch *e.Priority {
 						case 0:
-							priority = "  CRIT"
+							priority = "CRIT"
 						case 1:
-							priority = "  HIGH"
+							priority = "HIGH"
 						}
 					}
-					status := ""
-					if e.Status == "closed" {
-						status = "  CLOSED"
-					}
-					fmt.Printf("  %-10s %-5s %-50s %5dt%s%s\n",
-						e.ID, e.Type, client.Truncate(e.Title, 50),
-						e.TokenEstimate, priority, status)
+					status := e.Status
+					fmt.Printf("  %-100s  %5dt  %-4s  %-6s  %s\n",
+						client.Truncate(e.Title, 100),
+						e.TokenEstimate, priority, status, e.ID)
 				}
 			}
 		}

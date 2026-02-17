@@ -9,20 +9,21 @@ import (
 
 // BoardEntry represents a single shard in the board view
 type BoardEntry struct {
-	ID             string `json:"id"`
-	Type           string `json:"type"`
-	Title          string `json:"title"`
-	Area           string `json:"area"`
-	Description    string `json:"description"`
-	Status         string `json:"status"`
-	Priority       *int   `json:"priority,omitempty"`
-	TokenEstimate  int    `json:"token_estimate"`
-	Creator        string `json:"creator,omitempty"`
+	ID             string    `json:"id"`
+	Type           string    `json:"type"`
+	Title          string    `json:"title"`
+	Area           string    `json:"area"`
+	Description    string    `json:"description"`
+	Status         string    `json:"status"`
+	Priority       *int      `json:"priority,omitempty"`
+	TokenEstimate  int       `json:"token_estimate"`
+	Creator        string    `json:"creator,omitempty"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
-// BoardGroup represents a group of shards by area
+// BoardGroup represents a group of shards by type
 type BoardGroup struct {
-	Area          string       `json:"area"`
+	Type          string       `json:"type"`
 	Items         []BoardEntry `json:"items"`
 	TotalTokens   int          `json:"total_tokens"`
 }
@@ -73,7 +74,7 @@ func (c *Client) GetBoardShards(ctx context.Context, opts BoardOpts) (*BoardResu
 
 	// Build query: open shards + optionally recently closed
 	query := `
-		SELECT id, type, title, status, priority, COALESCE(LENGTH(content), 0), creator
+		SELECT id, type, title, status, priority, COALESCE(LENGTH(content), 0), creator, updated_at
 		FROM shards
 		WHERE project = $1
 		  AND type NOT IN ('session', 'memory', 'message')
@@ -95,7 +96,7 @@ func (c *Client) GetBoardShards(ctx context.Context, opts BoardOpts) (*BoardResu
 		argN++
 	}
 
-	query += ` ORDER BY priority NULLS LAST, updated_at DESC`
+	query += ` ORDER BY type, updated_at DESC`
 
 	rows, err := conn.Query(ctx, query, args...)
 	if err != nil {
@@ -103,14 +104,14 @@ func (c *Client) GetBoardShards(ctx context.Context, opts BoardOpts) (*BoardResu
 	}
 	defer rows.Close()
 
-	// Collect entries and group by area
+	// Collect entries and group by type
 	groupMap := make(map[string]*BoardGroup)
 	var groupOrder []string
 
 	for rows.Next() {
 		var e BoardEntry
 		var contentLen int
-		if err := rows.Scan(&e.ID, &e.Type, &e.Title, &e.Status, &e.Priority, &contentLen, &e.Creator); err != nil {
+		if err := rows.Scan(&e.ID, &e.Type, &e.Title, &e.Status, &e.Priority, &contentLen, &e.Creator, &e.UpdatedAt); err != nil {
 			continue
 		}
 		e.TokenEstimate = contentLen / 4
@@ -121,11 +122,11 @@ func (c *Client) GetBoardShards(ctx context.Context, opts BoardOpts) (*BoardResu
 			continue
 		}
 
-		g, exists := groupMap[e.Area]
+		g, exists := groupMap[e.Type]
 		if !exists {
-			g = &BoardGroup{Area: e.Area}
-			groupMap[e.Area] = g
-			groupOrder = append(groupOrder, e.Area)
+			g = &BoardGroup{Type: e.Type}
+			groupMap[e.Type] = g
+			groupOrder = append(groupOrder, e.Type)
 		}
 		g.Items = append(g.Items, e)
 		g.TotalTokens += e.TokenEstimate
@@ -133,8 +134,8 @@ func (c *Client) GetBoardShards(ctx context.Context, opts BoardOpts) (*BoardResu
 
 	// Build ordered groups
 	var groups []BoardGroup
-	for _, area := range groupOrder {
-		groups = append(groups, *groupMap[area])
+	for _, typ := range groupOrder {
+		groups = append(groups, *groupMap[typ])
 	}
 
 	// Get inbox count and memory count
