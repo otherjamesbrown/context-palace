@@ -56,12 +56,17 @@ func EstimateTokens(content string) int {
 	return len(content) / 4
 }
 
+// DefaultBoardTypes are the actionable shard types shown by default
+var DefaultBoardTypes = []string{"bug", "task", "design", "doc"}
+
 // BoardOpts holds options for GetBoardShards
 type BoardOpts struct {
 	Since  *time.Time // Include shards closed after this time
 	Area   string     // Filter to area prefix
 	Agent  string     // Filter by creator
 	Budget int        // Token budget highlight threshold
+	Types  []string   // Shard types to include (default: DefaultBoardTypes)
+	All    bool       // Show all types (overrides Types)
 }
 
 // GetBoardShards returns shards grouped by area for the board view
@@ -72,6 +77,14 @@ func (c *Client) GetBoardShards(ctx context.Context, opts BoardOpts) (*BoardResu
 	}
 	defer conn.Close(ctx)
 
+	// Determine which types to show
+	types := opts.Types
+	if opts.All {
+		types = nil
+	} else if len(types) == 0 {
+		types = DefaultBoardTypes
+	}
+
 	// Build query: open shards + optionally recently closed
 	query := `
 		SELECT id, type, title, status, priority, COALESCE(LENGTH(content), 0), creator, updated_at
@@ -81,6 +94,12 @@ func (c *Client) GetBoardShards(ctx context.Context, opts BoardOpts) (*BoardResu
 	`
 	args := []interface{}{c.Config.Project}
 	argN := 2
+
+	if len(types) > 0 {
+		query += fmt.Sprintf(` AND type = ANY($%d)`, argN)
+		args = append(args, types)
+		argN++
+	}
 
 	if opts.Since != nil {
 		query += fmt.Sprintf(` AND (status IN ('open', 'in_progress') OR (status = 'closed' AND closed_at >= $%d))`, argN)

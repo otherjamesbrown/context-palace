@@ -151,6 +151,8 @@ var sessionBoardCmd = &cobra.Command{
 	Example: `  cp session board
   cp session board --since 7d
   cp session board --area Pipeline
+  cp session board --all
+  cp session board --types bug,task
   cp session board -o json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
@@ -170,6 +172,12 @@ var sessionBoardCmd = &cobra.Command{
 		opts.Area, _ = cmd.Flags().GetString("area")
 		opts.Agent, _ = cmd.Flags().GetString("agent")
 		opts.Budget, _ = cmd.Flags().GetInt("budget")
+		opts.All, _ = cmd.Flags().GetBool("all")
+
+		typesStr, _ := cmd.Flags().GetString("types")
+		if typesStr != "" {
+			opts.Types = strings.Split(typesStr, ",")
+		}
 
 		result, err := cpClient.GetBoardShards(ctx, opts)
 		if err != nil {
@@ -375,6 +383,8 @@ func init() {
 	sessionBoardCmd.Flags().String("area", "", "Filter to area prefix")
 	sessionBoardCmd.Flags().String("agent", "", "Filter by creator agent")
 	sessionBoardCmd.Flags().Int("budget", 0, "Token budget highlight threshold")
+	sessionBoardCmd.Flags().Bool("all", false, "Show all shard types including knowledge and reports")
+	sessionBoardCmd.Flags().String("types", "", "Shard types to show (comma-separated, e.g., bug,task,design)")
 
 	rootCmd.AddCommand(sessionCmd)
 	sessionCmd.AddCommand(sessionBoardCmd)
