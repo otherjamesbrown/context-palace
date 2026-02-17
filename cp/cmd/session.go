@@ -221,13 +221,16 @@ var sessionBoardCmd = &cobra.Command{
 
 			// Type groups
 			for _, g := range result.Groups {
+				if len(g.Items) == 0 {
+					continue
+				}
 				if printed {
 					fmt.Println()
 				}
-				fmt.Printf("# Current Open %s (%d items, ~%s) #\n\n",
+				fmt.Printf("# Open %s (%d items, ~%s) #\n\n",
 					strings.ToUpper(g.Type+"s"), len(g.Items), formatTokens(g.TotalTokens))
 				for _, e := range g.Items {
-					printBoardEntry(e)
+					printBoardEntryNoType(e)
 				}
 				printed = true
 			}
@@ -240,21 +243,18 @@ var sessionBoardCmd = &cobra.Command{
 	},
 }
 
-// printBoardEntry prints a single board row: TITLE | TOKENS | AGE | PRIORITY | STATUS | ID
+// printBoardEntry prints a single board row: TYPE | TITLE | TOKENS | AGE | ID
 func printBoardEntry(e client.BoardEntry) {
-	priority := ""
-	if e.Priority != nil {
-		switch *e.Priority {
-		case 0:
-			priority = "CRIT"
-		case 1:
-			priority = "HIGH"
-		}
-	}
-	fmt.Printf("  %-100s  %5dt  %5s  %-4s  %-6s  %s\n",
+	fmt.Printf("  %-7s %-90s  %5dt  %5s  %s\n",
+		e.Type, client.Truncate(e.Title, 90),
+		e.TokenEstimate, client.FormatAgeHours(e.AgeHours), e.ID)
+}
+
+// printBoardEntryNoType prints a board row without type column (used in type-grouped sections)
+func printBoardEntryNoType(e client.BoardEntry) {
+	fmt.Printf("  %-100s  %5dt  %5s  %s\n",
 		client.Truncate(e.Title, 100),
-		e.TokenEstimate, client.FormatAgeHours(e.AgeHours),
-		priority, e.Status, e.ID)
+		e.TokenEstimate, client.FormatAgeHours(e.AgeHours), e.ID)
 }
 
 // parseDuration parses duration strings like "7d", "24h", "30d"
