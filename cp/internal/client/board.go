@@ -104,7 +104,7 @@ func (c *Client) GetBoardShards(ctx context.Context, opts BoardOpts) (*BoardResu
 	query := `
 		SELECT s.id, s.type, s.title, s.status, s.priority,
 			COALESCE(LENGTH(s.content), 0), s.creator, s.updated_at,
-			EXISTS(SELECT 1 FROM labels l WHERE l.shard_id = s.id AND l.label = 'focus') AS has_focus
+			('focus' = ANY(s.labels) OR EXISTS(SELECT 1 FROM labels l WHERE l.shard_id = s.id AND l.label = 'focus')) AS has_focus
 		FROM shards s
 		WHERE s.project = $1
 		  AND s.type NOT IN ('session', 'memory', 'message')
