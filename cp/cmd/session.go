@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/otherjamesbrown/context-palace/cp/internal/client"
 	"github.com/spf13/cobra"
@@ -143,6 +145,149 @@ var sessionShowCmd = &cobra.Command{
 	},
 }
 
+var sessionBoardCmd = &cobra.Command{
+	Use:   "board",
+	Short: "Show open shards grouped by area with token estimates",
+	Example: `  cp session board
+  cp session board --since 7d
+  cp session board --area Pipeline
+  cp session board -o json`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+
+		opts := client.BoardOpts{}
+
+		sinceStr, _ := cmd.Flags().GetString("since")
+		if sinceStr != "" {
+			d, err := parseDuration(sinceStr)
+			if err != nil {
+				return fmt.Errorf("invalid --since value: %v", err)
+			}
+			t := time.Now().Add(-d)
+			opts.Since = &t
+		}
+
+		opts.Area, _ = cmd.Flags().GetString("area")
+		opts.Agent, _ = cmd.Flags().GetString("agent")
+		opts.Budget, _ = cmd.Flags().GetInt("budget")
+
+		result, err := cpClient.GetBoardShards(ctx, opts)
+		if err != nil {
+			return err
+		}
+
+		if outputFormat == "json" {
+			s, _ := client.FormatJSON(result)
+			fmt.Println(s)
+			return nil
+		}
+
+		if len(result.Groups) == 0 {
+			fmt.Println("No shards to display.")
+		} else {
+			for i, g := range result.Groups {
+				if i > 0 {
+					fmt.Println()
+				}
+				fmt.Printf("%s (%d items, ~%s)\n", g.Area, len(g.Items), formatTokens(g.TotalTokens))
+				for _, e := range g.Items {
+					priority := ""
+					if e.Priority != nil {
+						switch *e.Priority {
+						case 0:
+							priority = "  CRIT"
+						case 1:
+							priority = "  HIGH"
+						}
+					}
+					status := ""
+					if e.Status == "closed" {
+						status = "  CLOSED"
+					}
+					fmt.Printf("  %-10s %-5s %-50s %5dt%s%s\n",
+						e.ID, e.Type, client.Truncate(e.Title, 50),
+						e.TokenEstimate, priority, status)
+				}
+			}
+		}
+
+		fmt.Println()
+		fmt.Printf("Inbox: %d unread messages\n", result.UnreadCount)
+		fmt.Printf("Memories: %d active\n", result.MemoryCount)
+		return nil
+	},
+}
+
+// parseDuration parses duration strings like "7d", "24h", "30d"
+func parseDuration(s string) (time.Duration, error) {
+	if strings.HasSuffix(s, "d") {
+		s = strings.TrimSuffix(s, "d")
+		var days int
+		if _, err := fmt.Sscanf(s, "%d", &days); err != nil {
+			return 0, fmt.Errorf("invalid day count: %s", s)
+		}
+		return time.Duration(days) * 24 * time.Hour, nil
+	}
+	return time.ParseDuration(s)
+}
+
+// formatTokens formats token count as "1.2k" or "450"
+func formatTokens(t int) string {
+	if t >= 1000 {
+		return fmt.Sprintf("%.1fk tokens", float64(t)/1000)
+	}
+	return fmt.Sprintf("%dt", t)
+}
+
+var sessionContextCmd = &cobra.Command{
+	Use:     "context <shard-id> [shard-id...]",
+	Short:   "Load shards as compact context blocks",
+	Args:    cobra.MinimumNArgs(1),
+	Example: "  cp session context pf-4b7bca pf-7313ed",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+
+		totalTokens := 0
+		for i, id := range args {
+			shard, err := cpClient.GetShard(ctx, id)
+			if err != nil {
+				return err
+			}
+
+			if i > 0 {
+				fmt.Println()
+			}
+
+			// Header: --- pf-xxx (type, status, PRIORITY) ---
+			header := fmt.Sprintf("--- %s (%s, %s", shard.ID, shard.Type, shard.Status)
+			if shard.Priority != nil {
+				switch *shard.Priority {
+				case 0:
+					header += ", CRIT"
+				case 1:
+					header += ", HIGH"
+				}
+			}
+			header += ") ---"
+			fmt.Println(header)
+
+			// Title
+			fmt.Println(shard.Title)
+
+			// Content
+			if shard.Content != "" {
+				fmt.Println(shard.Content)
+			}
+
+			tokens := client.EstimateTokens(shard.Content)
+			totalTokens += tokens
+		}
+
+		fmt.Printf("\n[%d shards, ~%s]\n", len(args), formatTokens(totalTokens))
+		return nil
+	},
+}
+
 var sessionInjectCmd = &cobra.Command{
 	Use:     "inject",
 	Short:   "Output formatted context for Claude Code hooks",
@@ -228,8 +373,14 @@ func init() {
 	sessionCheckpointCmd.Flags().String("session", "", "Session ID (default: current open session)")
 	sessionInjectCmd.Flags().String("tag", "", "Filter by checkpoint tag")
 	sessionLastCheckpointCmd.Flags().String("tag", "", "Filter by checkpoint tag")
+	sessionBoardCmd.Flags().String("since", "", "Include recently closed shards (e.g., 7d, 24h)")
+	sessionBoardCmd.Flags().String("area", "", "Filter to area prefix")
+	sessionBoardCmd.Flags().String("agent", "", "Filter by creator agent")
+	sessionBoardCmd.Flags().Int("budget", 0, "Token budget highlight threshold")
 
 	rootCmd.AddCommand(sessionCmd)
+	sessionCmd.AddCommand(sessionBoardCmd)
+	sessionCmd.AddCommand(sessionContextCmd)
 	sessionCmd.AddCommand(sessionEnsureCmd)
 	sessionCmd.AddCommand(sessionStartCmd)
 	sessionCmd.AddCommand(sessionCheckpointCmd)
