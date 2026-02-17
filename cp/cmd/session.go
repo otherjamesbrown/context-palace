@@ -190,30 +190,46 @@ var sessionBoardCmd = &cobra.Command{
 			return nil
 		}
 
-		if len(result.Groups) == 0 {
+		hasContent := len(result.Focus) > 0 || len(result.RecentActivity) > 0 || len(result.Groups) > 0
+
+		if !hasContent {
 			fmt.Println("No shards to display.")
 		} else {
-			for i, g := range result.Groups {
-				if i > 0 {
+			printed := false
+
+			// FOCUS section
+			if len(result.Focus) > 0 {
+				fmt.Printf("# FOCUS (%d items, ~%s) #\n\n", len(result.Focus), formatTokens(result.FocusTokens))
+				for _, e := range result.Focus {
+					printBoardEntry(e)
+				}
+				printed = true
+			}
+
+			// Recent Activity section
+			if len(result.RecentActivity) > 0 {
+				if printed {
+					fmt.Println()
+				}
+				fmt.Printf("# Recent Activity (last %dh, %d items, ~%s) #\n\n",
+					client.RecentActivityHours, len(result.RecentActivity), formatTokens(result.RecentTokens))
+				for _, e := range result.RecentActivity {
+					printBoardEntry(e)
+				}
+				printed = true
+			}
+
+			// Type groups
+			for _, g := range result.Groups {
+				if printed {
 					fmt.Println()
 				}
 				fmt.Printf("# Current Open %s (%d items, ~%s) #\n\n",
 					strings.ToUpper(g.Type+"s"), len(g.Items), formatTokens(g.TotalTokens))
 				for _, e := range g.Items {
-					priority := ""
-					if e.Priority != nil {
-						switch *e.Priority {
-						case 0:
-							priority = "CRIT"
-						case 1:
-							priority = "HIGH"
-						}
-					}
-					status := e.Status
-					fmt.Printf("  %-100s  %5dt  %-4s  %-6s  %s\n",
-						client.Truncate(e.Title, 100),
-						e.TokenEstimate, priority, status, e.ID)
+					printBoardEntry(e)
 				}
+				printed = true
 			}
 		}
 
@@ -222,6 +238,23 @@ var sessionBoardCmd = &cobra.Command{
 		fmt.Printf("Memories: %d active\n", result.MemoryCount)
 		return nil
 	},
+}
+
+// printBoardEntry prints a single board row: TITLE | TOKENS | AGE | PRIORITY | STATUS | ID
+func printBoardEntry(e client.BoardEntry) {
+	priority := ""
+	if e.Priority != nil {
+		switch *e.Priority {
+		case 0:
+			priority = "CRIT"
+		case 1:
+			priority = "HIGH"
+		}
+	}
+	fmt.Printf("  %-100s  %5dt  %5s  %-4s  %-6s  %s\n",
+		client.Truncate(e.Title, 100),
+		e.TokenEstimate, client.FormatAgeHours(e.AgeHours),
+		priority, e.Status, e.ID)
 }
 
 // parseDuration parses duration strings like "7d", "24h", "30d"
