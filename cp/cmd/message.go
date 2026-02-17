@@ -166,6 +166,27 @@ func resolveMessageBody(positional, flag string, stdin io.Reader) (string, error
 	return "", fmt.Errorf("message body is required: provide as 3rd argument, --body flag, or pipe to stdin")
 }
 
+var messageCountCmd = &cobra.Command{
+	Use:     "count",
+	Short:   "Count unread messages",
+	Example: "  cp message count\n  cp message count -o json",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		count, err := cpClient.InboxCount(ctx)
+		if err != nil {
+			return err
+		}
+
+		if outputFormat == "json" {
+			fmt.Printf(`{"unread": %d}`+"\n", count)
+			return nil
+		}
+
+		fmt.Println(count)
+		return nil
+	},
+}
+
 var messageInboxCmd = &cobra.Command{
 	Use:     "inbox",
 	Short:   "Show unread messages",
@@ -291,6 +312,7 @@ func init() {
 
 	rootCmd.AddCommand(messageCmd)
 	messageCmd.AddCommand(messageSendCmd)
+	messageCmd.AddCommand(messageCountCmd)
 	messageCmd.AddCommand(messageInboxCmd)
 	messageCmd.AddCommand(messageShowCmd)
 	messageCmd.AddCommand(messageReadCmd)

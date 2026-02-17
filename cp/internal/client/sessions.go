@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -33,6 +35,40 @@ func (c *Client) StartSession(ctx context.Context, title string) (string, error)
 	return c.CreateShard(ctx, title, content, "session", nil, nil)
 }
 
+// EnsureSessionResult contains the result of an EnsureSession call
+type EnsureSessionResult struct {
+	ID      string `json:"id"`
+	Title   string `json:"title"`
+	Created bool   `json:"created"`
+}
+
+// EnsureSession returns the current open session or creates one if none exists
+func (c *Client) EnsureSession(ctx context.Context) (*EnsureSessionResult, error) {
+	session, err := c.GetCurrentSession(ctx)
+	if err == nil {
+		return &EnsureSessionResult{
+			ID:      session.ID,
+			Title:   session.Title,
+			Created: false,
+		}, nil
+	}
+	if !errors.Is(err, ErrNoSession) {
+		return nil, err
+	}
+
+	// No open session — create one
+	title := fmt.Sprintf("Session: %s", time.Now().Format("2006-01-02"))
+	id, err := c.StartSession(ctx, title)
+	if err != nil {
+		return nil, err
+	}
+	return &EnsureSessionResult{
+		ID:      id,
+		Title:   title,
+		Created: true,
+	}, nil
+}
+
 // Checkpoint appends a checkpoint to the current session
 func (c *Client) Checkpoint(ctx context.Context, sessionID, note string) error {
 	conn, err := c.Connect(ctx)
@@ -55,6 +91,111 @@ func (c *Client) Checkpoint(ctx context.Context, sessionID, note string) error {
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
 	return nil
+}
+
+// CheckpointEntry represents a parsed checkpoint from session content
+type CheckpointEntry struct {
+	Timestamp string `json:"timestamp"`
+	Tag       string `json:"tag,omitempty"`
+	Content   string `json:"content"`
+}
+
+// checkpointRe matches checkpoint headers like: ### [14:30:05] Checkpoint
+// Optional tag formats: [handoff:main], [tag:deploy]
+var checkpointRe = regexp.MustCompile(`### \[(\d{2}:\d{2}:\d{2})\] Checkpoint(?:\s+\[(?:handoff:|tag:)?([^\]]*)\])?`)
+
+// LastCheckpoint returns the last checkpoint from the current session, optionally filtered by tag
+func (c *Client) LastCheckpoint(ctx context.Context, tag string) (*CheckpointEntry, error) {
+	session, err := c.GetCurrentSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return ParseLastCheckpoint(session.Content, tag)
+}
+
+// ParseLastCheckpoint extracts the last checkpoint from session content text
+func ParseLastCheckpoint(content, tag string) (*CheckpointEntry, error) {
+	// Find all checkpoint header positions
+	matches := checkpointRe.FindAllStringSubmatchIndex(content, -1)
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("no checkpoints found")
+	}
+
+	// Walk backwards to find the last matching checkpoint
+	for i := len(matches) - 1; i >= 0; i-- {
+		m := matches[i]
+		timestamp := content[m[2]:m[3]]
+
+		var cpTag string
+		if m[4] >= 0 && m[5] >= 0 {
+			cpTag = content[m[4]:m[5]]
+		}
+
+		// Filter by tag if specified
+		if tag != "" && cpTag != tag {
+			continue
+		}
+
+		// Extract content: from end of header line to next checkpoint header or end
+		headerEnd := m[1]
+		// Skip the newline after the header
+		bodyStart := headerEnd
+		if bodyStart < len(content) && content[bodyStart] == '\n' {
+			bodyStart++
+		}
+
+		var body string
+		if i+1 < len(matches) {
+			// Content goes until the next checkpoint's ### marker
+			nextStart := matches[i+1][0]
+			body = strings.TrimSpace(content[bodyStart:nextStart])
+		} else {
+			body = strings.TrimSpace(content[bodyStart:])
+		}
+
+		return &CheckpointEntry{
+			Timestamp: timestamp,
+			Tag:       cpTag,
+			Content:   body,
+		}, nil
+	}
+
+	return nil, fmt.Errorf("no checkpoints found with tag %q", tag)
+}
+
+// InjectContext builds a formatted context payload combining session metadata,
+// last checkpoint, and inbox count for Claude Code's additionalContext
+func (c *Client) InjectContext(ctx context.Context, tag string) (string, error) {
+	session, err := c.GetCurrentSession(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("[Context Palace] Session %s (open since %s)\n",
+		session.ID, session.CreatedAt.Format("2006-01-02")))
+
+	// Last checkpoint (optional — don't fail if none)
+	entry, cpErr := ParseLastCheckpoint(session.Content, tag)
+	if cpErr == nil {
+		if entry.Tag != "" {
+			sb.WriteString(fmt.Sprintf("Last checkpoint [%s] at %s:\n", entry.Tag, entry.Timestamp))
+		} else {
+			sb.WriteString(fmt.Sprintf("Last checkpoint at %s:\n", entry.Timestamp))
+		}
+		// Indent checkpoint content
+		for _, line := range strings.Split(entry.Content, "\n") {
+			sb.WriteString(fmt.Sprintf("  %s\n", line))
+		}
+	}
+
+	// Inbox count (optional — don't fail if unavailable)
+	count, countErr := c.InboxCount(ctx)
+	if countErr == nil {
+		sb.WriteString(fmt.Sprintf("Inbox: %d unread messages\n", count))
+	}
+
+	return sb.String(), nil
 }
 
 // ShowSession fetches a session by ID

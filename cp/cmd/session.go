@@ -15,6 +15,28 @@ var sessionCmd = &cobra.Command{
 	Long:  `Commands for managing work sessions — start, checkpoint, show, and end.`,
 }
 
+var sessionEnsureCmd = &cobra.Command{
+	Use:     "ensure",
+	Short:   "Ensure an open session exists (idempotent)",
+	Example: "  cp session ensure\n  cp session ensure -o json",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		result, err := cpClient.EnsureSession(ctx)
+		if err != nil {
+			return err
+		}
+
+		if outputFormat == "json" {
+			s, _ := client.FormatJSON(result)
+			fmt.Println(s)
+			return nil
+		}
+
+		fmt.Println(result.ID)
+		return nil
+	},
+}
+
 var sessionStartCmd = &cobra.Command{
 	Use:     "start [title]",
 	Short:   "Start a new work session",
@@ -121,6 +143,53 @@ var sessionShowCmd = &cobra.Command{
 	},
 }
 
+var sessionInjectCmd = &cobra.Command{
+	Use:     "inject",
+	Short:   "Output formatted context for Claude Code hooks",
+	Example: "  cp session inject\n  cp session inject --tag main",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		tag, _ := cmd.Flags().GetString("tag")
+
+		output, err := cpClient.InjectContext(ctx, tag)
+		if err != nil {
+			return err
+		}
+
+		fmt.Print(output)
+		return nil
+	},
+}
+
+var sessionLastCheckpointCmd = &cobra.Command{
+	Use:     "last-checkpoint",
+	Short:   "Show the last checkpoint from the current session",
+	Example: "  cp session last-checkpoint\n  cp session last-checkpoint --tag main\n  cp session last-checkpoint -o json",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		tag, _ := cmd.Flags().GetString("tag")
+
+		entry, err := cpClient.LastCheckpoint(ctx, tag)
+		if err != nil {
+			return err
+		}
+
+		if outputFormat == "json" {
+			s, _ := client.FormatJSON(entry)
+			fmt.Println(s)
+			return nil
+		}
+
+		if entry.Tag != "" {
+			fmt.Printf("[%s] at %s:\n", entry.Tag, entry.Timestamp)
+		} else {
+			fmt.Printf("at %s:\n", entry.Timestamp)
+		}
+		fmt.Println(entry.Content)
+		return nil
+	},
+}
+
 var sessionEndCmd = &cobra.Command{
 	Use:     "end [session-id]",
 	Short:   "End a session",
@@ -157,10 +226,15 @@ var sessionEndCmd = &cobra.Command{
 
 func init() {
 	sessionCheckpointCmd.Flags().String("session", "", "Session ID (default: current open session)")
+	sessionInjectCmd.Flags().String("tag", "", "Filter by checkpoint tag")
+	sessionLastCheckpointCmd.Flags().String("tag", "", "Filter by checkpoint tag")
 
 	rootCmd.AddCommand(sessionCmd)
+	sessionCmd.AddCommand(sessionEnsureCmd)
 	sessionCmd.AddCommand(sessionStartCmd)
 	sessionCmd.AddCommand(sessionCheckpointCmd)
 	sessionCmd.AddCommand(sessionShowCmd)
+	sessionCmd.AddCommand(sessionInjectCmd)
+	sessionCmd.AddCommand(sessionLastCheckpointCmd)
 	sessionCmd.AddCommand(sessionEndCmd)
 }

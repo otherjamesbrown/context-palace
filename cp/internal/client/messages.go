@@ -94,6 +94,25 @@ func (c *Client) GetMessage(ctx context.Context, id string) (*Message, error) {
 	}, nil
 }
 
+// InboxCount returns the count of unread messages for the configured agent
+func (c *Client) InboxCount(ctx context.Context) (int, error) {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer conn.Close(ctx)
+
+	var count int
+	err = conn.QueryRow(ctx,
+		`SELECT COUNT(*) FROM unread_for($1, $2)`,
+		c.Config.Project, c.Config.Agent,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count inbox: %v", err)
+	}
+	return count, nil
+}
+
 // MarkRead marks messages as read for the configured agent
 func (c *Client) MarkRead(ctx context.Context, shardIDs []string) (int, error) {
 	conn, err := c.Connect(ctx)
