@@ -196,10 +196,13 @@ func (c *Client) GetBoardShards(ctx context.Context, opts BoardOpts) (*BoardResu
 		}
 	}
 
-	// 3. Type groups (all items, including focus and recent — they still belong in their type group)
+	// 3. Type groups (exclude items already shown in focus or recent activity)
 	groupMap := make(map[string]*BoardGroup)
 	var groupOrder []string
 	for _, e := range allEntries {
+		if focusSeen[e.ID] || recentSeen[e.ID] {
+			continue
+		}
 		g, exists := groupMap[e.Type]
 		if !exists {
 			g = &BoardGroup{Type: e.Type}
