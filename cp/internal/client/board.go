@@ -71,8 +71,8 @@ func FormatAgeHours(hours int) string {
 // DefaultBoardTypes are the actionable shard types shown by default
 var DefaultBoardTypes = []string{"bug", "task", "design", "doc"}
 
-// RecentActivityHours is the cutoff for the recent activity section
-const RecentActivityHours = 8
+// RecentActivityWindow is the lookback window from the most recent shard update
+const RecentActivityWindow = 4 * time.Hour
 
 // BoardOpts holds options for GetBoardShards
 type BoardOpts struct {
@@ -141,10 +141,10 @@ func (c *Client) GetBoardShards(ctx context.Context, opts BoardOpts) (*BoardResu
 	defer rows.Close()
 
 	now := time.Now()
-	recentCutoff := now.Add(-RecentActivityHours * time.Hour)
 
 	// Collect all entries
 	var allEntries []BoardEntry
+	var maxUpdated time.Time
 	for rows.Next() {
 		var e BoardEntry
 		var contentLen int
@@ -161,8 +161,14 @@ func (c *Client) GetBoardShards(ctx context.Context, opts BoardOpts) (*BoardResu
 			continue
 		}
 
+		if e.UpdatedAt.After(maxUpdated) {
+			maxUpdated = e.UpdatedAt
+		}
 		allEntries = append(allEntries, e)
 	}
+
+	// Recent activity: everything within RecentActivityWindow of the most recent update
+	recentCutoff := maxUpdated.Add(-RecentActivityWindow)
 
 	// Partition into focus, recent, and type groups
 	result := &BoardResult{}

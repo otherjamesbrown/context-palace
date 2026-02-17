@@ -211,8 +211,8 @@ var sessionBoardCmd = &cobra.Command{
 				if printed {
 					fmt.Println()
 				}
-				fmt.Printf("# Recent Activity (last %dh, %d items, ~%s) #\n\n",
-					client.RecentActivityHours, len(result.RecentActivity), formatTokens(result.RecentTokens))
+				fmt.Printf("# Recent Activity (%d items, ~%s) #\n\n",
+					len(result.RecentActivity), formatTokens(result.RecentTokens))
 				for _, e := range result.RecentActivity {
 					printBoardEntry(e)
 				}
