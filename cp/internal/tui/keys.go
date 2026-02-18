@@ -19,9 +19,12 @@ type KeyMap struct {
 	Bottom    key.Binding
 	HalfUp   key.Binding
 	HalfDown key.Binding
+	PageUp   key.Binding
+	PageDown key.Binding
 	ExpandAll    key.Binding
 	CollapseAll  key.Binding
 	ToggleClosed key.Binding
+	Refresh      key.Binding
 	Quit         key.Binding
 }
 
@@ -80,6 +83,14 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("ctrl+d"),
 			key.WithHelp("C-d", "half down"),
 		),
+		PageUp: key.NewBinding(
+			key.WithKeys("shift+up", "pgup"),
+			key.WithHelp("S-up", "page up"),
+		),
+		PageDown: key.NewBinding(
+			key.WithKeys("shift+down", "pgdown"),
+			key.WithHelp("S-down", "page down"),
+		),
 		ExpandAll: key.NewBinding(
 			key.WithKeys("o"),
 			key.WithHelp("o", "expand all"),
@@ -91,6 +102,10 @@ func DefaultKeyMap() KeyMap {
 		ToggleClosed: key.NewBinding(
 			key.WithKeys("c"),
 			key.WithHelp("c", "closed"),
+		),
+		Refresh: key.NewBinding(
+			key.WithKeys("r"),
+			key.WithHelp("r", "refresh"),
 		),
 		Quit: key.NewBinding(
 			key.WithKeys("q", "ctrl+c"),

@@ -173,6 +173,8 @@ func TypeColor(shardType string) lipgloss.Color {
 		return lipgloss.Color("220") // yellow
 	case "session":
 		return lipgloss.Color("117") // light blue
+	case "board":
+		return lipgloss.Color("44") // cyan
 	default:
 		return lipgloss.Color("252") // white
 	}

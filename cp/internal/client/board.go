@@ -21,6 +21,7 @@ type BoardEntry struct {
 	Creator       string    `json:"creator,omitempty"`
 	UpdatedAt     time.Time `json:"updated_at"`
 	AgeHours      int       `json:"age_hours"`
+	ChildCount    int       `json:"child_count,omitempty"`
 	HasFocus      bool      `json:"has_focus,omitempty"`
 }
 
@@ -104,7 +105,9 @@ func (c *Client) GetBoardShards(ctx context.Context, opts BoardOpts) (*BoardResu
 	query := `
 		SELECT s.id, s.type, s.title, s.status, s.priority,
 			COALESCE(LENGTH(s.content), 0), s.creator, s.updated_at,
-			('focus' = ANY(s.labels) OR EXISTS(SELECT 1 FROM labels l WHERE l.shard_id = s.id AND l.label = 'focus')) AS has_focus
+			('focus' = ANY(s.labels) OR EXISTS(SELECT 1 FROM labels l WHERE l.shard_id = s.id AND l.label = 'focus')) AS has_focus,
+			(SELECT COUNT(*) FROM edges e WHERE e.to_id = s.id AND e.edge_type = 'child-of') +
+			(SELECT COUNT(*) FROM shards c WHERE c.parent_id = s.id AND c.project = s.project) AS child_count
 		FROM shards s
 		WHERE s.project = $1
 		  AND s.type NOT IN ('session', 'memory', 'message')
@@ -149,7 +152,7 @@ func (c *Client) GetBoardShards(ctx context.Context, opts BoardOpts) (*BoardResu
 		var e BoardEntry
 		var contentLen int
 		if err := rows.Scan(&e.ID, &e.Type, &e.Title, &e.Status, &e.Priority,
-			&contentLen, &e.Creator, &e.UpdatedAt, &e.HasFocus); err != nil {
+			&contentLen, &e.Creator, &e.UpdatedAt, &e.HasFocus, &e.ChildCount); err != nil {
 			continue
 		}
 		e.TokenEstimate = contentLen / 4

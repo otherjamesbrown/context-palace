@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"sort"
 	"time"
 
@@ -199,4 +200,61 @@ func GroupByLabel(roots []*TreeNode) []*TreeNode {
 		groups = append(groups, g)
 	}
 	return groups
+}
+
+// BuildBoardTree converts a BoardResult into TreeNodes for the board tab.
+func BuildBoardTree(result *client.BoardResult) []*TreeNode {
+	var roots []*TreeNode
+
+	if len(result.Focus) > 0 {
+		roots = append(roots, boardGroup(
+			"group:board:focus",
+			fmt.Sprintf("Focus (%d)", len(result.Focus)),
+			result.Focus,
+		))
+	}
+
+	if len(result.RecentActivity) > 0 {
+		roots = append(roots, boardGroup(
+			"group:board:recent",
+			fmt.Sprintf("Recent Activity (%d)", len(result.RecentActivity)),
+			result.RecentActivity,
+		))
+	}
+
+	for _, g := range result.Groups {
+		roots = append(roots, boardGroup(
+			"group:board:type:"+g.Type,
+			fmt.Sprintf("%s (%d)", g.Type, len(g.Items)),
+			g.Items,
+		))
+	}
+
+	return roots
+}
+
+func boardGroup(id, title string, entries []client.BoardEntry) *TreeNode {
+	g := &TreeNode{
+		ID:         id,
+		Title:      title,
+		IsGroup:    true,
+		Loaded:     true,
+		Expanded:   true,
+		ChildCount: len(entries),
+		Depth:      0,
+	}
+	children := make([]*TreeNode, len(entries))
+	for i, e := range entries {
+		children[i] = &TreeNode{
+			ID:         e.ID,
+			Title:      e.Title,
+			Type:       e.Type,
+			Status:     e.Status,
+			ChildCount: e.ChildCount,
+			Depth:      1,
+			Parent:     g,
+		}
+	}
+	g.Children = children
+	return g
 }
