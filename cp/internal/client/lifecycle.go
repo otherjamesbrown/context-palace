@@ -6,15 +6,99 @@ import (
 	"time"
 )
 
-// AssignResult holds the result of assigning a shard
-type AssignResult struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
-	Owner string `json:"owner"`
+// ValidStatuses lists all valid shard statuses.
+var ValidStatuses = []string{"open", "ready", "in_progress", "needs-review", "closed"}
+
+// shardStatusTransitions maps each status to the set of statuses it can transition to.
+var shardStatusTransitions = map[string]map[string]bool{
+	"open":         {"ready": true, "in_progress": true, "closed": true},
+	"ready":        {"open": true, "in_progress": true, "closed": true},
+	"in_progress":  {"open": true, "needs-review": true, "closed": true},
+	"needs-review": {"open": true, "in_progress": true, "closed": true},
+	"closed":       {"open": true},
 }
 
-// AssignShard atomically claims a shard for an agent
-func (c *Client) AssignShard(ctx context.Context, shardID string, agent string) (*AssignResult, error) {
+// IsValidStatus returns true if the status is a recognized shard status.
+func IsValidStatus(status string) bool {
+	_, ok := shardStatusTransitions[status]
+	return ok
+}
+
+// IsValidTransition returns true if transitioning from → to is allowed.
+func IsValidTransition(from, to string) bool {
+	if from == to {
+		return false
+	}
+	targets, ok := shardStatusTransitions[from]
+	if !ok {
+		return false
+	}
+	return targets[to]
+}
+
+// TransitionResult holds the result of a status transition.
+type TransitionResult struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	OldStatus string `json:"old_status"`
+	NewStatus string `json:"new_status"`
+}
+
+// TransitionShardStatus validates and applies a status transition.
+func (c *Client) TransitionShardStatus(ctx context.Context, shardID, newStatus string) (*TransitionResult, error) {
+	if !IsValidStatus(newStatus) {
+		return nil, fmt.Errorf("invalid status %q (valid: open, ready, in_progress, needs-review, closed)", newStatus)
+	}
+
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(ctx)
+
+	// Get current status
+	var currentStatus, title string
+	err = conn.QueryRow(ctx,
+		`SELECT status, title FROM shards WHERE id = $1 AND project = $2`,
+		shardID, c.Config.Project).Scan(&currentStatus, &title)
+	if err != nil {
+		return nil, fmt.Errorf("shard %s not found", shardID)
+	}
+
+	if currentStatus == newStatus {
+		return &TransitionResult{
+			ID: shardID, Title: title,
+			OldStatus: currentStatus, NewStatus: newStatus,
+		}, nil
+	}
+
+	if !IsValidTransition(currentStatus, newStatus) {
+		return nil, fmt.Errorf("invalid transition: %s → %s", currentStatus, newStatus)
+	}
+
+	_, err = conn.Exec(ctx,
+		`UPDATE shards SET status = $1, updated_at = NOW() WHERE id = $2 AND project = $3`,
+		newStatus, shardID, c.Config.Project)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update status: %v", err)
+	}
+
+	return &TransitionResult{
+		ID: shardID, Title: title,
+		OldStatus: currentStatus, NewStatus: newStatus,
+	}, nil
+}
+
+// AssignResult holds the result of assigning a shard
+type AssignResult struct {
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Owner    string `json:"owner"`
+	Instance string `json:"instance,omitempty"`
+}
+
+// AssignShard atomically claims a shard for an agent with optional instance identity
+func (c *Client) AssignShard(ctx context.Context, shardID string, agent string, instance string) (*AssignResult, error) {
 	if agent == "" {
 		agent = c.Config.Agent
 	}
@@ -25,17 +109,23 @@ func (c *Client) AssignShard(ctx context.Context, shardID string, agent string) 
 	}
 	defer conn.Close(ctx)
 
+	var instanceArg interface{}
+	if instance != "" {
+		instanceArg = instance
+	}
+
 	var title string
-	err = conn.QueryRow(ctx, `SELECT shard_assign($1, $2, $3)`,
-		c.Config.Project, shardID, agent).Scan(&title)
+	err = conn.QueryRow(ctx, `SELECT shard_assign($1, $2, $3, $4)`,
+		c.Config.Project, shardID, agent, instanceArg).Scan(&title)
 	if err != nil {
 		return nil, fmt.Errorf("%s", extractPgMessage(err.Error()))
 	}
 
 	return &AssignResult{
-		ID:    shardID,
-		Title: title,
-		Owner: agent,
+		ID:       shardID,
+		Title:    title,
+		Owner:    agent,
+		Instance: instance,
 	}, nil
 }
 

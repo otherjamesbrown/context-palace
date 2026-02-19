@@ -33,8 +33,8 @@ type RequirementEdge struct {
 	LifecycleStatus string `json:"lifecycle_status,omitempty"`
 }
 
-// Valid lifecycle transitions: from -> []to
-var validTransitions = map[string][]string{
+// Valid requirement lifecycle transitions: from -> []to
+var reqLifecycleTransitions = map[string][]string{
 	"draft":       {"approved"},
 	"approved":    {"in_progress"},
 	"in_progress": {"implemented", "approved"},
@@ -75,7 +75,7 @@ func resolveEdgeDirection(reqID, targetID, edgeType string) (fromID, toID string
 
 // validateTransition checks if a lifecycle transition is valid
 func validateTransition(from, to string) error {
-	allowed, ok := validTransitions[from]
+	allowed, ok := reqLifecycleTransitions[from]
 	if !ok {
 		return fmt.Errorf("unknown lifecycle status: %s", from)
 	}

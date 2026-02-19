@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/otherjamesbrown/context-palace/cp/internal/client"
@@ -21,8 +22,12 @@ var shardAssignCmd = &cobra.Command{
 		id := args[0]
 
 		agent, _ := cmd.Flags().GetString("agent")
+		instance, _ := cmd.Flags().GetString("instance")
+		if instance == "" {
+			instance = os.Getenv("CLAUDE_INSTANCE_ID")
+		}
 
-		result, err := cpClient.AssignShard(ctx, id, agent)
+		result, err := cpClient.AssignShard(ctx, id, agent, instance)
 		if err != nil {
 			return err
 		}
@@ -34,12 +39,19 @@ var shardAssignCmd = &cobra.Command{
 				"owner":  result.Owner,
 				"status": "in_progress",
 			}
+			if result.Instance != "" {
+				out["instance"] = result.Instance
+			}
 			s, _ := client.FormatJSON(out)
 			fmt.Println(s)
 			return nil
 		}
 
-		fmt.Printf("Assigned %s %q to %s\n", result.ID, result.Title, result.Owner)
+		if result.Instance != "" {
+			fmt.Printf("Assigned %s %q to %s (instance: %s)\n", result.ID, result.Title, result.Owner, result.Instance)
+		} else {
+			fmt.Printf("Assigned %s %q to %s\n", result.ID, result.Title, result.Owner)
+		}
 		return nil
 	},
 }
@@ -196,22 +208,25 @@ var shardBoardCmd = &cobra.Command{
 		}
 
 		if outputFormat == "json" {
-			var openShards, inProgressShards, completedShards []client.BoardShard
+			var openShards, inProgressShards, needsReviewShards, completedShards []client.BoardShard
 			for _, s := range shards {
 				switch s.Status {
 				case "closed":
 					completedShards = append(completedShards, s)
 				case "in_progress":
 					inProgressShards = append(inProgressShards, s)
+				case "needs-review":
+					needsReviewShards = append(needsReviewShards, s)
 				default:
 					openShards = append(openShards, s)
 				}
 			}
 			out := map[string]any{
-				"scope":       scopeLabel,
-				"open":        openShards,
-				"in_progress": inProgressShards,
-				"completed":   completedShards,
+				"scope":        scopeLabel,
+				"open":         openShards,
+				"in_progress":  inProgressShards,
+				"needs_review": needsReviewShards,
+				"completed":    completedShards,
 			}
 			if epicID != nil {
 				out["epic_id"] = *epicID
@@ -244,13 +259,15 @@ var shardBoardCmd = &cobra.Command{
 		}
 
 		// Group by status
-		var openShards, inProgressShards, completedShards []client.BoardShard
+		var openShards, inProgressShards, needsReviewShards, completedShards []client.BoardShard
 		for _, s := range shards {
 			switch s.Status {
 			case "closed":
 				completedShards = append(completedShards, s)
 			case "in_progress":
 				inProgressShards = append(inProgressShards, s)
+			case "needs-review":
+				needsReviewShards = append(needsReviewShards, s)
 			default:
 				openShards = append(openShards, s)
 			}
@@ -284,6 +301,18 @@ var shardBoardCmd = &cobra.Command{
 			fmt.Println()
 		}
 
+		if len(needsReviewShards) > 0 {
+			fmt.Printf("NEEDS REVIEW (%d)\n", len(needsReviewShards))
+			for _, s := range needsReviewShards {
+				owner := ""
+				if s.Owner != nil {
+					owner = fmt.Sprintf("(%s)", shortAgent(*s.Owner))
+				}
+				fmt.Printf("  \u25C7 %-10s %-8s %-40s %s\n", s.ID, s.Kind, client.Truncate(s.Title, 40), owner)
+			}
+			fmt.Println()
+		}
+
 		if len(completedShards) > 0 {
 			fmt.Printf("COMPLETED (%d)\n", len(completedShards))
 			for _, s := range completedShards {
@@ -300,9 +329,55 @@ var shardBoardCmd = &cobra.Command{
 	},
 }
 
+// -- shard status --
+
+var shardStatusCmd = &cobra.Command{
+	Use:   "status <shard-id> <new-status>",
+	Short: "Transition a shard to a new status",
+	Long: `Valid statuses: open, ready, in_progress, needs-review, closed
+
+Valid transitions:
+  open         → ready, in_progress, closed
+  ready        → open, in_progress, closed
+  in_progress  → open, needs-review, closed
+  needs-review → open, in_progress, closed
+  closed       → open`,
+	Args:    cobra.ExactArgs(2),
+	Example: "  cxp shard status pf-abc123 ready\n  cxp shard status pf-abc123 needs-review",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		id := args[0]
+		newStatus := args[1]
+
+		result, err := cpClient.TransitionShardStatus(ctx, id, newStatus)
+		if err != nil {
+			return err
+		}
+
+		if outputFormat == "json" {
+			out := map[string]any{
+				"id":         result.ID,
+				"old_status": result.OldStatus,
+				"new_status": result.NewStatus,
+			}
+			s, _ := client.FormatJSON(out)
+			fmt.Println(s)
+			return nil
+		}
+
+		if result.OldStatus == result.NewStatus {
+			fmt.Printf("%s: already %s\n", result.ID, result.NewStatus)
+		} else {
+			fmt.Printf("%s: %s → %s\n", result.ID, result.OldStatus, result.NewStatus)
+		}
+		return nil
+	},
+}
+
 func init() {
 	// shard assign flags
 	shardAssignCmd.Flags().String("agent", "", "Agent claiming the shard (default: config agent)")
+	shardAssignCmd.Flags().String("instance", "", "Instance ID for this session (default: $CLAUDE_INSTANCE_ID)")
 
 	// shard next flags
 	shardNextCmd.Flags().String("epic", "", "Scope to specific epic")
@@ -316,6 +391,7 @@ func init() {
 
 	// Wire into shard command tree
 	shardCmd.AddCommand(shardAssignCmd)
+	shardCmd.AddCommand(shardStatusCmd)
 	shardCmd.AddCommand(shardNextCmd)
 	shardCmd.AddCommand(shardBoardCmd)
 }
