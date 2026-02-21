@@ -19,6 +19,7 @@ type EpicProgress struct {
 type EpicChild struct {
 	ID           string     `json:"id"`
 	Title        string     `json:"title"`
+	Description  *string    `json:"description,omitempty"`
 	Status       string     `json:"status"`
 	Kind         string     `json:"kind"`
 	Owner        *string    `json:"owner,omitempty"`
@@ -59,7 +60,7 @@ func (c *Client) GetEpicChildren(ctx context.Context, epicID string) ([]EpicChil
 
 	rows, err := conn.Query(ctx, `
 		SELECT id, title, status, kind, owner, priority,
-			assigned_at, closed_at, closed_by, closed_reason, blocked_by
+			assigned_at, closed_at, closed_by, closed_reason, blocked_by, description
 		FROM epic_children($1, $2)
 	`, c.Config.Project, epicID)
 	if err != nil {
@@ -72,7 +73,7 @@ func (c *Client) GetEpicChildren(ctx context.Context, epicID string) ([]EpicChil
 		var ch EpicChild
 		if err := rows.Scan(&ch.ID, &ch.Title, &ch.Status, &ch.Kind,
 			&ch.Owner, &ch.Priority, &ch.AssignedAt, &ch.ClosedAt,
-			&ch.ClosedBy, &ch.ClosedReason, &ch.BlockedBy); err != nil {
+			&ch.ClosedBy, &ch.ClosedReason, &ch.BlockedBy, &ch.Description); err != nil {
 			return nil, fmt.Errorf("failed to scan epic child: %v", err)
 		}
 		if ch.BlockedBy == nil {

@@ -227,20 +227,21 @@ func (c *Client) CreateEdgeSimple(ctx context.Context, fromID, toID, edgeType st
 
 // ShardDetailResult holds the result of a shard_detail() call
 type ShardDetailResult struct {
-	ID                string          `json:"id"`
-	Title             string          `json:"title"`
-	Content           string          `json:"content"`
-	Type              string          `json:"type"`
-	Status            string          `json:"status"`
-	Creator           string          `json:"creator"`
-	Labels            []string        `json:"labels,omitempty"`
-	Metadata          json.RawMessage `json:"metadata,omitempty"`
-	CreatedAt         time.Time       `json:"created_at"`
-	UpdatedAt         time.Time       `json:"updated_at"`
-	OutgoingEdgeCount  int               `json:"outgoing_edge_count"`
-	IncomingEdgeCount  int               `json:"incoming_edge_count"`
-	Edges              []EdgeInfo        `json:"edges,omitempty"`
-	KnowledgeChildren  []KnowledgeChild  `json:"children,omitempty"`
+	ID                 string          `json:"id"`
+	Title              string          `json:"title"`
+	Description        *string         `json:"description,omitempty"`
+	Content            string          `json:"content"`
+	Type               string          `json:"type"`
+	Status             string          `json:"status"`
+	Creator            string          `json:"creator"`
+	Labels             []string        `json:"labels,omitempty"`
+	Metadata           json.RawMessage `json:"metadata,omitempty"`
+	CreatedAt          time.Time       `json:"created_at"`
+	UpdatedAt          time.Time       `json:"updated_at"`
+	OutgoingEdgeCount  int             `json:"outgoing_edge_count"`
+	IncomingEdgeCount  int             `json:"incoming_edge_count"`
+	Edges              []EdgeInfo      `json:"edges,omitempty"`
+	KnowledgeChildren  []KnowledgeChild `json:"children,omitempty"`
 }
 
 // GetShardDetail fetches a shard with full detail (including edge counts)
@@ -255,11 +256,11 @@ func (c *Client) GetShardDetail(ctx context.Context, id string) (*ShardDetailRes
 	err = conn.QueryRow(ctx, `
 		SELECT id, title, COALESCE(content, ''), type, status, creator,
 			labels, COALESCE(metadata, '{}'), created_at, updated_at,
-			outgoing_edge_count, incoming_edge_count
+			outgoing_edge_count, incoming_edge_count, description
 		FROM shard_detail($1)
 	`, id).Scan(&d.ID, &d.Title, &d.Content, &d.Type, &d.Status, &d.Creator,
 		&d.Labels, &d.Metadata, &d.CreatedAt, &d.UpdatedAt,
-		&d.OutgoingEdgeCount, &d.IncomingEdgeCount)
+		&d.OutgoingEdgeCount, &d.IncomingEdgeCount, &d.Description)
 	if err != nil {
 		return nil, fmt.Errorf("Shard %s not found", id)
 	}

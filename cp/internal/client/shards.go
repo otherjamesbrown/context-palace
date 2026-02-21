@@ -13,20 +13,21 @@ import (
 
 // Shard represents a Context Palace shard
 type Shard struct {
-	ID        string     `json:"id" yaml:"id"`
-	Project   string     `json:"project" yaml:"project"`
-	Title     string     `json:"title" yaml:"title"`
-	Content   string     `json:"content,omitempty" yaml:"content,omitempty"`
-	Type      string     `json:"type" yaml:"type"`
-	Status    string     `json:"status" yaml:"status"`
-	Priority  *int       `json:"priority,omitempty" yaml:"priority,omitempty"`
-	Creator   string     `json:"creator" yaml:"creator"`
-	Owner     *string          `json:"owner,omitempty" yaml:"owner,omitempty"`
-	CreatedAt time.Time        `json:"created_at" yaml:"created_at"`
-	UpdatedAt time.Time        `json:"updated_at" yaml:"updated_at"`
-	Metadata  json.RawMessage  `json:"metadata,omitempty" yaml:"metadata,omitempty"`
-	Labels    []string         `json:"labels,omitempty" yaml:"labels,omitempty"`
-	Artifacts []Artifact `json:"artifacts,omitempty" yaml:"artifacts,omitempty"`
+	ID          string          `json:"id" yaml:"id"`
+	Project     string          `json:"project" yaml:"project"`
+	Title       string          `json:"title" yaml:"title"`
+	Description *string         `json:"description,omitempty" yaml:"description,omitempty"`
+	Content     string          `json:"content,omitempty" yaml:"content,omitempty"`
+	Type        string          `json:"type" yaml:"type"`
+	Status      string          `json:"status" yaml:"status"`
+	Priority    *int            `json:"priority,omitempty" yaml:"priority,omitempty"`
+	Creator     string          `json:"creator" yaml:"creator"`
+	Owner       *string         `json:"owner,omitempty" yaml:"owner,omitempty"`
+	CreatedAt   time.Time       `json:"created_at" yaml:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at" yaml:"updated_at"`
+	Metadata    json.RawMessage `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+	Labels      []string        `json:"labels,omitempty" yaml:"labels,omitempty"`
+	Artifacts   []Artifact      `json:"artifacts,omitempty" yaml:"artifacts,omitempty"`
 }
 
 // Artifact represents a task artifact
@@ -56,9 +57,9 @@ func (c *Client) GetShardCounts(ctx context.Context) (*ShardCounts, error) {
 	err = conn.QueryRow(ctx, `
 		SELECT
 			count(*),
-			count(*) FILTER (WHERE status = 'open' OR status = 'in_progress'),
+			count(*) FILTER (WHERE status IN ('open', 'ready', 'in_progress', 'needs-review')),
 			count(*) FILTER (WHERE status = 'closed'),
-			count(*) FILTER (WHERE status NOT IN ('open', 'in_progress', 'closed'))
+			count(*) FILTER (WHERE status NOT IN ('open', 'ready', 'in_progress', 'needs-review', 'closed'))
 		FROM shards WHERE project = $1
 	`, c.Config.Project).Scan(&counts.Total, &counts.Open, &counts.Closed, &counts.Other)
 	if err != nil {
@@ -77,11 +78,11 @@ func (c *Client) GetShard(ctx context.Context, id string) (*Shard, error) {
 
 	var s Shard
 	err = conn.QueryRow(ctx, `
-		SELECT id, project, title, COALESCE(content, ''), type, status,
+		SELECT id, project, title, description, COALESCE(content, ''), type, status,
 			priority, creator, owner, created_at, updated_at,
 			COALESCE(metadata, '{}')
 		FROM shards WHERE id = $1
-	`, id).Scan(&s.ID, &s.Project, &s.Title, &s.Content, &s.Type, &s.Status,
+	`, id).Scan(&s.ID, &s.Project, &s.Title, &s.Description, &s.Content, &s.Type, &s.Status,
 		&s.Priority, &s.Creator, &s.Owner, &s.CreatedAt, &s.UpdatedAt,
 		&s.Metadata)
 
@@ -547,35 +548,39 @@ func (c *Client) ListShardsCount(ctx context.Context, opts ListShardsOpts) (int,
 
 // UpdateShardResult holds the result of an update_shard() call
 type UpdateShardResult struct {
-	ID             string    `json:"id"`
-	UpdatedAt      time.Time `json:"updated_at"`
-	TitleChanged   bool      `json:"title_changed,omitempty"`
-	ContentChanged bool      `json:"content_changed,omitempty"`
-	ShardType      string    `json:"shard_type"`
+	ID                 string    `json:"id"`
+	UpdatedAt          time.Time `json:"updated_at"`
+	TitleChanged       bool      `json:"title_changed,omitempty"`
+	ContentChanged     bool      `json:"content_changed,omitempty"`
+	ShardType          string    `json:"shard_type"`
+	DescriptionChanged bool      `json:"description_changed,omitempty"`
 }
 
-// UpdateShardFields updates a shard's title and/or content using update_shard()
-func (c *Client) UpdateShardFields(ctx context.Context, id string, title *string, content *string) (*UpdateShardResult, error) {
+// UpdateShardFields updates a shard's title, content, and/or description using update_shard()
+func (c *Client) UpdateShardFields(ctx context.Context, id string, title *string, content *string, description *string) (*UpdateShardResult, error) {
 	conn, err := c.Connect(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close(ctx)
 
-	var titleArg, contentArg any
+	var titleArg, contentArg, descArg any
 	if title != nil {
 		titleArg = *title
 	}
 	if content != nil {
 		contentArg = *content
 	}
+	if description != nil {
+		descArg = *description
+	}
 
 	var r UpdateShardResult
 	err = conn.QueryRow(ctx, `
-		SELECT id, updated_at, title_changed, content_changed, shard_type
-		FROM update_shard($1, $2, $3, $4)
-	`, id, c.Config.Project, titleArg, contentArg).Scan(
-		&r.ID, &r.UpdatedAt, &r.TitleChanged, &r.ContentChanged, &r.ShardType)
+		SELECT id, updated_at, title_changed, content_changed, shard_type, description_changed
+		FROM update_shard($1, $2, $3, $4, $5)
+	`, id, c.Config.Project, titleArg, contentArg, descArg).Scan(
+		&r.ID, &r.UpdatedAt, &r.TitleChanged, &r.ContentChanged, &r.ShardType, &r.DescriptionChanged)
 	if err != nil {
 		return nil, fmt.Errorf("%s", extractPgMessage(err.Error()))
 	}
@@ -590,6 +595,53 @@ func (c *Client) UpdateShardFields(ctx context.Context, id string, title *string
 	}
 
 	return &r, nil
+}
+
+// ShardChild holds a child shard summary for the children section of shard show
+type ShardChild struct {
+	ID          string  `json:"id"`
+	Title       string  `json:"title"`
+	Description *string `json:"description,omitempty"`
+	Type        string  `json:"type"`
+	Status      string  `json:"status"`
+}
+
+// GetShardChildren returns child shards (by parent_id) for a given shard
+func (c *Client) GetShardChildren(ctx context.Context, parentID string) ([]ShardChild, error) {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(ctx)
+
+	rows, err := conn.Query(ctx, `
+		SELECT id, title, description, type, status
+		FROM shards
+		WHERE parent_id = $1 AND project = $2
+		ORDER BY
+			CASE status
+				WHEN 'in_progress' THEN 0
+				WHEN 'needs-review' THEN 1
+				WHEN 'ready' THEN 2
+				WHEN 'open' THEN 3
+				WHEN 'closed' THEN 4
+			END,
+			priority NULLS LAST, created_at
+	`, parentID, c.Config.Project)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get shard children: %v", err)
+	}
+	defer rows.Close()
+
+	var children []ShardChild
+	for rows.Next() {
+		var ch ShardChild
+		if err := rows.Scan(&ch.ID, &ch.Title, &ch.Description, &ch.Type, &ch.Status); err != nil {
+			return nil, fmt.Errorf("failed to scan shard child: %v", err)
+		}
+		children = append(children, ch)
+	}
+	return children, nil
 }
 
 // tryEmbed attempts to embed a shard's content. Non-fatal: silently ignores errors.

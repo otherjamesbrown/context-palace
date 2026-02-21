@@ -203,6 +203,7 @@ var shardCreateCmd = &cobra.Command{
 		bodyFile, _ := cmd.Flags().GetString("body-file")
 		metaFlag, _ := cmd.Flags().GetString("meta")
 		labelFlag, _ := cmd.Flags().GetString("label")
+		description, _ := cmd.Flags().GetString("description")
 
 		if shardType == "" {
 			return fmt.Errorf("--type is required")
@@ -248,12 +249,20 @@ var shardCreateCmd = &cobra.Command{
 			return err
 		}
 
+		// Set description if provided (separate UPDATE since create_shard doesn't have the param)
+		if description != "" {
+			_, _ = cpClient.UpdateShardFields(ctx, id, nil, nil, &description)
+		}
+
 		if outputFormat == "json" {
 			result := map[string]any{
 				"id":         id,
 				"type":       shardType,
 				"title":      title,
 				"created_at": time.Now().UTC().Format(time.RFC3339),
+			}
+			if description != "" {
+				result["description"] = description
 			}
 			s, _ := client.FormatJSON(result)
 			fmt.Println(s)
@@ -394,6 +403,10 @@ var shardShowCmd = &cobra.Command{
 		fmt.Printf("Creator:  %s\n", detail.Creator)
 		fmt.Printf("Created:  %s\n", detail.CreatedAt.Format("2006-01-02 15:04"))
 
+		if detail.Description != nil && *detail.Description != "" {
+			fmt.Printf("Desc:     %s\n", *detail.Description)
+		}
+
 		if len(detail.Labels) > 0 {
 			fmt.Printf("Labels:   %s\n", strings.Join(detail.Labels, ", "))
 		}
@@ -426,6 +439,19 @@ var shardShowCmd = &cobra.Command{
 			fmt.Print(strings.ReplaceAll(tbl.String(), "\n", "\n  "))
 		}
 
+		// Children
+		children, _ := cpClient.GetShardChildren(ctx, id)
+		if len(children) > 0 {
+			fmt.Printf("\nChildren (%d)\n", len(children))
+			for _, ch := range children {
+				desc := ""
+				if ch.Description != nil && *ch.Description != "" {
+					desc = " — " + *ch.Description
+				}
+				fmt.Printf("  %-10s %-8s %-8s %s%s\n", ch.ID, ch.Type, ch.Status, client.Truncate(ch.Title, 40), desc)
+			}
+		}
+
 		return nil
 	},
 }
@@ -446,9 +472,10 @@ var shardUpdateCmd = &cobra.Command{
 		body, _ := cmd.Flags().GetString("body")
 		bodyFile, _ := cmd.Flags().GetString("body-file")
 		title, _ := cmd.Flags().GetString("title")
+		description, _ := cmd.Flags().GetString("description")
 
-		if body == "" && bodyFile == "" && title == "" {
-			return fmt.Errorf("at least one of --body, --body-file, or --title is required")
+		if body == "" && bodyFile == "" && title == "" && description == "" {
+			return fmt.Errorf("at least one of --body, --body-file, --title, or --description is required")
 		}
 		if body != "" && bodyFile != "" {
 			return fmt.Errorf("cannot use both --body and --body-file")
@@ -471,7 +498,12 @@ var shardUpdateCmd = &cobra.Command{
 			titlePtr = &title
 		}
 
-		result, err := cpClient.UpdateShardFields(ctx, id, titlePtr, contentPtr)
+		var descPtr *string
+		if description != "" {
+			descPtr = &description
+		}
+
+		result, err := cpClient.UpdateShardFields(ctx, id, titlePtr, contentPtr, descPtr)
 		if err != nil {
 			return err
 		}
@@ -488,6 +520,9 @@ var shardUpdateCmd = &cobra.Command{
 			}
 			if result.TitleChanged {
 				updatedFields = append(updatedFields, "title")
+			}
+			if result.DescriptionChanged {
+				updatedFields = append(updatedFields, "description")
 			}
 			out := map[string]any{
 				"id":             id,
@@ -690,6 +725,7 @@ func init() {
 	shardCreateCmd.Flags().String("body-file", "", "Content from file")
 	shardCreateCmd.Flags().String("label", "", "Comma-separated labels")
 	shardCreateCmd.Flags().String("meta", "", "Metadata as JSON")
+	shardCreateCmd.Flags().String("description", "", "Short description/tagline")
 
 	// shard list flags
 	shardListCmd.Flags().String("type", "", "Comma-separated shard types")
@@ -704,6 +740,7 @@ func init() {
 	shardUpdateCmd.Flags().String("body", "", "New content (inline)")
 	shardUpdateCmd.Flags().String("body-file", "", "New content (from file)")
 	shardUpdateCmd.Flags().String("title", "", "New title")
+	shardUpdateCmd.Flags().String("description", "", "Short description/tagline")
 
 	// shard close flags
 	shardCloseCmd.Flags().String("reason", "", "Closure reason")
