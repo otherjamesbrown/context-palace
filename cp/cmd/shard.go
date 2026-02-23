@@ -433,7 +433,11 @@ var shardShowCmd = &cobra.Command{
 			fmt.Println("\nEdges:")
 			tbl := client.NewTable("DIRECTION", "EDGE TYPE", "SHARD", "TYPE", "TITLE")
 			for _, e := range edges {
-				tbl.AddRow(e.Direction, e.EdgeType, e.ShardID, e.Type, client.Truncate(e.Title, 40))
+				title := client.Truncate(e.Title, 40)
+				if e.Description != nil && *e.Description != "" {
+					title = client.Truncate(e.Title, 40) + " — " + *e.Description
+				}
+				tbl.AddRow(e.Direction, e.EdgeType, e.ShardID, e.Type, title)
 			}
 			fmt.Print("  ")
 			fmt.Print(strings.ReplaceAll(tbl.String(), "\n", "\n  "))

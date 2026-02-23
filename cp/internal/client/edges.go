@@ -34,6 +34,7 @@ type EdgeInfo struct {
 	Type           string          `json:"type"`
 	Status         string          `json:"status"`
 	EdgeMetadata   json.RawMessage `json:"edge_metadata,omitempty"`
+	Description    *string         `json:"description,omitempty"`
 }
 
 // EdgeTreeNode represents a node in the edge follow tree
@@ -119,7 +120,8 @@ func (c *Client) GetShardEdges(ctx context.Context, shardID string, direction st
 
 	rows, err := conn.Query(ctx, `
 		SELECT direction, edge_type, linked_shard_id, linked_shard_title,
-			linked_shard_type, linked_shard_status, edge_metadata
+			linked_shard_type, linked_shard_status, edge_metadata,
+			linked_shard_description
 		FROM shard_edges($1, $2, $3)
 	`, shardID, dirArg, edgeTypesArg)
 	if err != nil {
@@ -131,7 +133,7 @@ func (c *Client) GetShardEdges(ctx context.Context, shardID string, direction st
 	for rows.Next() {
 		var e EdgeInfo
 		if err := rows.Scan(&e.Direction, &e.EdgeType, &e.ShardID,
-			&e.Title, &e.Type, &e.Status, &e.EdgeMetadata); err != nil {
+			&e.Title, &e.Type, &e.Status, &e.EdgeMetadata, &e.Description); err != nil {
 			return nil, fmt.Errorf("failed to scan edge: %v", err)
 		}
 		edges = append(edges, e)
