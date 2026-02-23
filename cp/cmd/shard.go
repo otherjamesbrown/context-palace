@@ -417,6 +417,9 @@ var shardShowCmd = &cobra.Command{
 			var meta map[string]any
 			if json.Unmarshal(detail.Metadata, &meta) == nil {
 				for k, v := range meta {
+					if k == "access_log" {
+						continue
+					}
 					fmt.Printf("  %s: %v\n", k, v)
 				}
 			}
@@ -428,11 +431,49 @@ var shardShowCmd = &cobra.Command{
 			fmt.Printf("  %s\n", detail.Content)
 		}
 
-		// Edges
-		if len(edges) > 0 {
+		// Split edges into children (incoming child-of) and other edges
+		var childEdges, otherEdges []client.EdgeInfo
+		for _, e := range edges {
+			if e.EdgeType == "previous-version" {
+				continue
+			}
+			if e.Direction == "incoming" && e.EdgeType == "child-of" {
+				childEdges = append(childEdges, e)
+			} else {
+				otherEdges = append(otherEdges, e)
+			}
+		}
+
+		// Children — compact list with drilldown hint
+		if len(childEdges) > 0 {
+			fmt.Printf("\n--- Children (%d) ---\n", len(childEdges))
+			for _, e := range childEdges {
+				desc := ""
+				if e.Description != nil && *e.Description != "" {
+					desc = " — " + *e.Description
+				}
+				fmt.Printf("  %-22s %s%s\n", e.ShardID, e.Title, desc)
+			}
+		}
+
+		// Also show children from parent_id relationship
+		children, _ := cpClient.GetShardChildren(ctx, id)
+		if len(children) > 0 && len(childEdges) == 0 {
+			fmt.Printf("\n--- Children (%d) ---\n", len(children))
+			for _, ch := range children {
+				desc := ""
+				if ch.Description != nil && *ch.Description != "" {
+					desc = " — " + *ch.Description
+				}
+				fmt.Printf("  %-22s %s%s\n", ch.ID, ch.Title, desc)
+			}
+		}
+
+		// Other edges — standard table
+		if len(otherEdges) > 0 {
 			fmt.Println("\nEdges:")
 			tbl := client.NewTable("DIRECTION", "EDGE TYPE", "SHARD", "TYPE", "TITLE")
-			for _, e := range edges {
+			for _, e := range otherEdges {
 				title := client.Truncate(e.Title, 40)
 				if e.Description != nil && *e.Description != "" {
 					title = client.Truncate(e.Title, 40) + " — " + *e.Description
@@ -441,19 +482,6 @@ var shardShowCmd = &cobra.Command{
 			}
 			fmt.Print("  ")
 			fmt.Print(strings.ReplaceAll(tbl.String(), "\n", "\n  "))
-		}
-
-		// Children
-		children, _ := cpClient.GetShardChildren(ctx, id)
-		if len(children) > 0 {
-			fmt.Printf("\nChildren (%d)\n", len(children))
-			for _, ch := range children {
-				desc := ""
-				if ch.Description != nil && *ch.Description != "" {
-					desc = " — " + *ch.Description
-				}
-				fmt.Printf("  %-10s %-8s %-8s %s%s\n", ch.ID, ch.Type, ch.Status, client.Truncate(ch.Title, 40), desc)
-			}
 		}
 
 		return nil
