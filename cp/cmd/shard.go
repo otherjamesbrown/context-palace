@@ -446,7 +446,7 @@ var shardShowCmd = &cobra.Command{
 
 		// Children — compact list with drilldown hint
 		if len(childEdges) > 0 {
-			fmt.Printf("\n--- Children (%d) ---\n", len(childEdges))
+			fmt.Printf("\n--- Children (%d) — load with `cxp shard show <id>` to show more information on these topics ---\n", len(childEdges))
 			for _, e := range childEdges {
 				desc := ""
 				if e.Description != nil && *e.Description != "" {
@@ -459,7 +459,7 @@ var shardShowCmd = &cobra.Command{
 		// Also show children from parent_id relationship
 		children, _ := cpClient.GetShardChildren(ctx, id)
 		if len(children) > 0 && len(childEdges) == 0 {
-			fmt.Printf("\n--- Children (%d) ---\n", len(children))
+			fmt.Printf("\n--- Children (%d) — load with `cxp shard show <id>` to show more information on these topics ---\n", len(children))
 			for _, ch := range children {
 				desc := ""
 				if ch.Description != nil && *ch.Description != "" {
