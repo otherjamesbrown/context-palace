@@ -223,7 +223,7 @@ var contextProjectCmd = &cobra.Command{
 
 		// Count by type
 		rows, err := conn.Query(ctx, `
-			SELECT type, count(*), count(*) FILTER (WHERE status = 'open' OR status = 'in_progress')
+			SELECT type, count(*), count(*) FILTER (WHERE status IN ('open', 'ready', 'in_progress', 'needs-review'))
 			FROM shards WHERE project = $1
 			GROUP BY type ORDER BY count(*) DESC
 		`, project)

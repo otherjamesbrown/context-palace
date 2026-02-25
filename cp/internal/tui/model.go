@@ -3,9 +3,11 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -35,9 +37,18 @@ type BrowseModel struct {
 
 	// Detail pane
 	detail        *client.ShardDetailResult
+	detailRaw     string // raw output from cxp shard show
 	detailID      string // ID of shard being displayed or loading
 	detailLoading bool
 	detailVP      viewport.Model
+
+	// Search mode
+	searchMode    bool
+	searchInput   textinput.Model
+	searchResult  *client.ShardContextResult
+	searchLoading bool
+	searchErr     string
+	searchTarget  int // cursor index of target in search results
 
 	// Layout
 	width     int
@@ -85,6 +96,7 @@ type childrenLoadedMsg struct {
 type detailLoadedMsg struct {
 	id     string
 	detail *client.ShardDetailResult
+	raw    string // raw output from cxp shard show
 }
 
 type boardLoadedMsg struct {
@@ -93,6 +105,11 @@ type boardLoadedMsg struct {
 
 type typesRefreshedMsg struct {
 	types []client.ShardType
+}
+
+type searchLoadedMsg struct {
+	result *client.ShardContextResult
+	raw    string // cxp shard show output for the target
 }
 
 type errMsg struct {
@@ -154,21 +171,30 @@ func (m BrowseModel) loadChildren(parentID string) tea.Cmd {
 	}
 }
 
-func (m BrowseModel) loadDetail(id string) tea.Cmd {
+func (m BrowseModel) loadSearch(id string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		detail, err := m.client.GetShardDetail(ctx, id)
+		result, err := m.client.GetShardContext(ctx, id)
 		if err != nil {
-			return errMsg{err}
+			return searchLoadedMsg{} // will show error via empty result
 		}
-		// For knowledge shards, also fetch children
-		if detail.Type == "knowledge" {
-			children, err := m.client.ListKnowledgeChildren(ctx, id)
-			if err == nil && len(children) > 0 {
-				detail.KnowledgeChildren = children
-			}
+		// Get raw detail output
+		out, _ := exec.Command("cxp", "shard", "show", id).Output()
+		return searchLoadedMsg{result: result, raw: string(out)}
+	}
+}
+
+func (m BrowseModel) loadDetail(id string) tea.Cmd {
+	return func() tea.Msg {
+		// Use cxp shard show for rendering
+		out, err := exec.Command("cxp", "shard", "show", id).Output()
+		if err != nil {
+			return errMsg{fmt.Errorf("cxp shard show %s: %w", id, err)}
 		}
-		return detailLoadedMsg{id: id, detail: detail}
+		// Still load structured detail for metadata (type, status, etc.)
+		ctx := context.Background()
+		detail, _ := m.client.GetShardDetail(ctx, id)
+		return detailLoadedMsg{id: id, detail: detail, raw: string(out)}
 	}
 }
 
@@ -193,8 +219,8 @@ func (m BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		detailWidth := m.width - m.treeWidth - 3 // border chars
 		detailHeight := m.height - 5              // tabs + status bar + borders
 		m.detailVP = viewport.New(detailWidth, detailHeight)
-		if m.detail != nil {
-			m.detailVP.SetContent(RenderDetail(m.detail, detailWidth, m.styles))
+		if m.detailRaw != "" {
+			m.setDetailContent()
 		}
 		return m, nil
 
@@ -292,9 +318,35 @@ func (m BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.detail = msg.detail
+		m.detailRaw = msg.raw
 		m.detailLoading = false
-		detailWidth := m.width - m.treeWidth - 3
-		m.detailVP.SetContent(RenderDetail(m.detail, detailWidth, m.styles))
+		m.setDetailContent()
+		m.detailVP.GotoTop()
+		return m, nil
+
+	case searchLoadedMsg:
+		m.searchLoading = false
+		if msg.result == nil {
+			m.searchErr = "Shard not found"
+			return m, nil
+		}
+		m.searchResult = msg.result
+		m.searchErr = ""
+		// Build context tree
+		roots, targetIdx := BuildSearchTree(msg.result)
+		m.roots = roots
+		m.nodeMap = make(map[string]*TreeNode)
+		for _, root := range m.roots {
+			addToMap(root, m.nodeMap)
+		}
+		m.flatList = Flatten(m.roots)
+		m.cursor = targetIdx
+		m.searchTarget = targetIdx
+		// Load detail for target
+		m.detailID = msg.result.Target.ID
+		m.detailLoading = false
+		m.detailRaw = msg.raw
+		m.setDetailContent()
 		m.detailVP.GotoTop()
 		return m, nil
 
@@ -305,6 +357,13 @@ func (m BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
+	}
+
+	// Forward to textinput if in search input mode (for cursor blink etc)
+	if m.searchMode && m.searchInput.Focused() {
+		var cmd tea.Cmd
+		m.searchInput, cmd = m.searchInput.Update(msg)
+		return m, cmd
 	}
 
 	// Forward to viewport if detail focused
@@ -318,15 +377,30 @@ func (m BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Quit always works
-	if key.Matches(msg, m.keys.Quit) {
+	// Quit always works (but not when typing in search input)
+	if key.Matches(msg, m.keys.Quit) && !(m.searchMode && m.searchInput.Focused()) {
 		return m, tea.Quit
+	}
+
+	// Search mode: text input captures all keys
+	if m.searchMode && m.searchInput.Focused() {
+		return m.handleSearchInput(msg)
+	}
+
+	// Esc exits search results back to previous view
+	if m.searchResult != nil && msg.Type == tea.KeyEscape {
+		return m.exitSearch()
 	}
 
 	// Tab switches pane focus
 	if key.Matches(msg, m.keys.Tab) {
 		m.focusLeft = !m.focusLeft
 		return m, nil
+	}
+
+	// Search key enters search mode
+	if key.Matches(msg, m.keys.Search) && m.focusLeft {
+		return m.enterSearch()
 	}
 
 	// Type switching: number keys (1=Board, 2-9=shard types)
@@ -524,11 +598,14 @@ func (m BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m BrowseModel) switchType(idx int) (tea.Model, tea.Cmd) {
-	if idx == m.activeType && !m.boardMode {
+	if idx == m.activeType && !m.boardMode && m.searchResult == nil {
 		return m, nil
 	}
 	m.activeType = idx
 	m.boardMode = false
+	m.searchMode = false
+	m.searchResult = nil
+	m.searchErr = ""
 	m.roots = nil
 	m.flatList = nil
 	m.nodeMap = make(map[string]*TreeNode)
@@ -541,10 +618,13 @@ func (m BrowseModel) switchType(idx int) (tea.Model, tea.Cmd) {
 }
 
 func (m BrowseModel) switchToBoard() (tea.Model, tea.Cmd) {
-	if m.boardMode {
+	if m.boardMode && m.searchResult == nil {
 		return m, nil
 	}
 	m.boardMode = true
+	m.searchMode = false
+	m.searchResult = nil
+	m.searchErr = ""
 	m.roots = nil
 	m.flatList = nil
 	m.nodeMap = make(map[string]*TreeNode)
@@ -608,6 +688,68 @@ func (m BrowseModel) collapseOrParent() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m BrowseModel) enterSearch() (tea.Model, tea.Cmd) {
+	m.searchMode = true
+	m.searchErr = ""
+	m.searchResult = nil
+	ti := textinput.New()
+	ti.Placeholder = "shard ID (e.g. pf-6f32c7)"
+	ti.CharLimit = 40
+	ti.Width = m.treeWidth - 4
+	ti.Focus()
+	m.searchInput = ti
+	return m, textinput.Blink
+}
+
+func (m BrowseModel) exitSearch() (tea.Model, tea.Cmd) {
+	m.searchMode = false
+	m.searchResult = nil
+	m.searchErr = ""
+	m.searchInput.Blur()
+	// Restore previous view
+	m.roots = nil
+	m.flatList = nil
+	m.nodeMap = make(map[string]*TreeNode)
+	m.cursor = 0
+	m.detail = nil
+	m.detailID = ""
+	m.detailRaw = ""
+	m.loading = true
+	m.loadingMsg = "Reloading..."
+	if m.boardMode {
+		return m, tea.Batch(m.loadBoard(), m.refreshTypes())
+	}
+	if len(m.types) > 0 {
+		return m, tea.Batch(m.refreshTypes(), m.loadRoots(m.types[m.activeType].Type))
+	}
+	return m, m.loadTypes
+}
+
+func (m BrowseModel) handleSearchInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEscape:
+		// Cancel search, return to previous view
+		m.searchMode = false
+		m.searchInput.Blur()
+		m.searchErr = ""
+		return m, nil
+	case tea.KeyEnter:
+		// Execute search
+		id := strings.TrimSpace(m.searchInput.Value())
+		if id == "" {
+			return m, nil
+		}
+		m.searchInput.Blur()
+		m.searchLoading = true
+		m.searchErr = ""
+		return m, m.loadSearch(id)
+	}
+	// Forward to textinput
+	var cmd tea.Cmd
+	m.searchInput, cmd = m.searchInput.Update(msg)
+	return m, cmd
+}
+
 // maybeLoadDetail updates detailID on the model and returns a load command.
 // Returns the modified model so callers get the state change.
 func (m BrowseModel) maybeLoadDetail() (BrowseModel, tea.Cmd) {
@@ -658,7 +800,7 @@ func (m BrowseModel) View() string {
 	treeContent := banner + m.renderTree()
 	detailContent := m.renderDetailPane()
 
-	contentHeight := m.height - 3 // tabs + status bar
+	contentHeight := m.height - 4 // tabs + status bar + pane borders
 
 	// Apply pane styles
 	var treePane, detailPane string
@@ -692,7 +834,7 @@ func (m BrowseModel) renderTabs() string {
 
 	// Board tab (always first)
 	boardLabel := "1:Board"
-	if m.boardMode {
+	if m.boardMode && m.searchResult == nil {
 		tabs = append(tabs, m.styles.ActiveTab.Render(boardLabel))
 	} else {
 		tabs = append(tabs, m.styles.InactiveTab.Render(boardLabel))
@@ -700,16 +842,47 @@ func (m BrowseModel) renderTabs() string {
 
 	for i, t := range m.types {
 		label := fmt.Sprintf("%d:%s (%d)", i+2, t.Type, t.Count)
-		if !m.boardMode && i == m.activeType {
+		if !m.boardMode && i == m.activeType && m.searchResult == nil {
 			tabs = append(tabs, m.styles.ActiveTab.Render(label))
 		} else {
 			tabs = append(tabs, m.styles.InactiveTab.Render(label))
 		}
 	}
-	return m.styles.TabBar.Render(lipgloss.JoinHorizontal(lipgloss.Bottom, tabs...))
+
+	// Search indicator
+	if m.searchMode || m.searchResult != nil {
+		tabs = append(tabs, m.styles.ActiveTab.Render("Search"))
+	}
+
+	return m.styles.TabBar.Width(m.width).Render(lipgloss.JoinHorizontal(lipgloss.Bottom, tabs...))
 }
 
 func (m BrowseModel) renderBanner() string {
+	// Search mode: show input or result header
+	if m.searchMode || m.searchResult != nil {
+		var b strings.Builder
+		if m.searchInput.Focused() {
+			// Show text input
+			b.WriteString(" ")
+			b.WriteString(m.styles.SearchInput.Render(m.searchInput.View()))
+			b.WriteString("\n\n")
+			if m.searchLoading {
+				b.WriteString(m.styles.Muted.Render("  Searching..."))
+				b.WriteString("\n")
+			}
+			if m.searchErr != "" {
+				b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Render("  " + m.searchErr))
+				b.WriteString("\n")
+			}
+		} else if m.searchResult != nil {
+			searchStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214"))
+			b.WriteString(fmt.Sprintf(" %s  %s\n\n",
+				searchStyle.Render("SEARCH"),
+				m.styles.Muted.Render(m.searchResult.Target.ID)))
+		}
+		return b.String()
+	}
+
 	if m.boardMode {
 		if m.boardResult == nil {
 			return ""
@@ -748,6 +921,16 @@ func (m BrowseModel) renderBanner() string {
 }
 
 func (m BrowseModel) renderTree() string {
+	if m.searchMode && m.searchInput.Focused() {
+		if m.searchLoading {
+			return ""
+		}
+		if m.searchErr != "" {
+			return ""
+		}
+		// Input is showing in banner; tree below is empty until results
+		return ""
+	}
 	if m.loading {
 		return m.styles.Muted.Render(m.loadingMsg)
 	}
@@ -807,7 +990,15 @@ func (m BrowseModel) renderTreeLine(node *TreeNode, isCursor bool) string {
 		if len(title) > maxTitleLen && maxTitleLen > 3 {
 			title = title[:maxTitleLen-3] + "..."
 		}
-		groupTitle := m.styles.GroupTitle.Render(title)
+		// Pick style based on board group ID
+		groupStyle := m.styles.GroupTitle
+		switch node.ID {
+		case "group:board:needs-review":
+			groupStyle = m.styles.GroupNeedsReview
+		case "group:board:blocked":
+			groupStyle = m.styles.GroupBlocked
+		}
+		groupTitle := groupStyle.Render(title)
 		count := m.styles.ChildCount.Render(fmt.Sprintf(" (%d)", node.ChildCount))
 		line = fmt.Sprintf("%s%s%s%s", indent, icon, groupTitle, count)
 	} else {
@@ -826,6 +1017,11 @@ func (m BrowseModel) renderTreeLine(node *TreeNode, isCursor bool) string {
 			childHint = m.styles.ChildCount.Render(fmt.Sprintf(" (%d)", node.ChildCount))
 		}
 
+		// Highlight search target
+		if m.searchResult != nil && node.ID == m.searchResult.Target.ID {
+			title = m.styles.SearchHighlight.Render(title)
+		}
+
 		line = fmt.Sprintf("%s%s%s %s%s", indent, icon, typeIcon, title, childHint)
 	}
 
@@ -837,11 +1033,20 @@ func (m BrowseModel) renderTreeLine(node *TreeNode, isCursor bool) string {
 	return line
 }
 
+// setDetailContent wraps raw output to the detail pane width and sets it on the viewport.
+func (m *BrowseModel) setDetailContent() {
+	w := m.width - m.treeWidth - 5 // border chars + padding
+	if w < 20 {
+		w = 20
+	}
+	m.detailVP.SetContent(wordWrap(m.detailRaw, w))
+}
+
 func (m BrowseModel) renderDetailPane() string {
 	if m.detailLoading {
 		return RenderLoading(m.detailID, m.styles)
 	}
-	if m.detail == nil {
+	if m.detailRaw == "" {
 		return RenderEmpty(m.styles)
 	}
 
@@ -851,15 +1056,32 @@ func (m BrowseModel) renderDetailPane() string {
 func (m BrowseModel) renderStatusBar() string {
 	s := m.styles
 
-	help := []struct{ key, desc string }{
-		{"j/k", "nav"},
-		{"h/l", "tree"},
-		{"1", "board"},
-		{"[/]", "type"},
-		{"r", "refresh"},
-		{"c", "closed"},
-		{"tab", "pane"},
-		{"q", "quit"},
+	var help []struct{ key, desc string }
+	if m.searchMode && m.searchInput.Focused() {
+		help = []struct{ key, desc string }{
+			{"enter", "search"},
+			{"esc", "cancel"},
+		}
+	} else if m.searchResult != nil {
+		help = []struct{ key, desc string }{
+			{"j/k", "nav"},
+			{"h/l", "tree"},
+			{"tab", "pane"},
+			{"esc", "back"},
+			{"s", "new search"},
+		}
+	} else {
+		help = []struct{ key, desc string }{
+			{"j/k", "nav"},
+			{"h/l", "tree"},
+			{"1", "board"},
+			{"[/]", "type"},
+			{"s", "search"},
+			{"r", "refresh"},
+			{"c", "closed"},
+			{"tab", "pane"},
+			{"q", "quit"},
+		}
 	}
 
 	var parts []string

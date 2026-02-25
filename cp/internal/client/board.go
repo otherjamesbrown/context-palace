@@ -23,6 +23,8 @@ type BoardEntry struct {
 	AgeHours      int       `json:"age_hours"`
 	ChildCount    int       `json:"child_count,omitempty"`
 	HasFocus      bool      `json:"has_focus,omitempty"`
+	NeedsReview   bool      `json:"needs_review,omitempty"`
+	IsBlocked     bool      `json:"is_blocked,omitempty"`
 }
 
 // BoardGroup represents a group of shards by type
@@ -34,13 +36,17 @@ type BoardGroup struct {
 
 // BoardResult holds the full board output
 type BoardResult struct {
-	Focus          []BoardEntry `json:"focus,omitempty"`
-	FocusTokens    int          `json:"focus_tokens,omitempty"`
-	RecentActivity []BoardEntry `json:"recent_activity,omitempty"`
-	RecentTokens   int          `json:"recent_tokens,omitempty"`
-	Groups         []BoardGroup `json:"groups"`
-	UnreadCount    int          `json:"unread_count"`
-	MemoryCount    int          `json:"memory_count"`
+	Focus              []BoardEntry `json:"focus,omitempty"`
+	FocusTokens        int          `json:"focus_tokens,omitempty"`
+	NeedsReview        []BoardEntry `json:"needs_review,omitempty"`
+	NeedsReviewTokens  int          `json:"needs_review_tokens,omitempty"`
+	Blocked            []BoardEntry `json:"blocked,omitempty"`
+	BlockedTokens      int          `json:"blocked_tokens,omitempty"`
+	RecentActivity     []BoardEntry `json:"recent_activity,omitempty"`
+	RecentTokens       int          `json:"recent_tokens,omitempty"`
+	Groups             []BoardGroup `json:"groups"`
+	UnreadCount        int          `json:"unread_count"`
+	MemoryCount        int          `json:"memory_count"`
 }
 
 // ParseArea extracts area and description from a structured title.
@@ -106,6 +112,8 @@ func (c *Client) GetBoardShards(ctx context.Context, opts BoardOpts) (*BoardResu
 		SELECT s.id, s.type, s.title, s.status, s.priority,
 			COALESCE(LENGTH(s.content), 0), s.creator, s.updated_at,
 			('focus' = ANY(s.labels) OR EXISTS(SELECT 1 FROM labels l WHERE l.shard_id = s.id AND l.label = 'focus')) AS has_focus,
+			('needs-review' = ANY(s.labels) OR EXISTS(SELECT 1 FROM labels l WHERE l.shard_id = s.id AND l.label = 'needs-review')) AS needs_review,
+			('blocked' = ANY(s.labels) OR EXISTS(SELECT 1 FROM labels l WHERE l.shard_id = s.id AND l.label = 'blocked')) AS is_blocked,
 			(SELECT COUNT(*) FROM edges e WHERE e.to_id = s.id AND e.edge_type = 'child-of') +
 			(SELECT COUNT(*) FROM shards c WHERE c.parent_id = s.id AND c.project = s.project) AS child_count
 		FROM shards s
@@ -122,11 +130,11 @@ func (c *Client) GetBoardShards(ctx context.Context, opts BoardOpts) (*BoardResu
 	}
 
 	if opts.Since != nil {
-		query += fmt.Sprintf(` AND (s.status IN ('open', 'in_progress') OR (s.status = 'closed' AND s.closed_at >= $%d))`, argN)
+		query += fmt.Sprintf(` AND (s.status IN ('open', 'ready', 'in_progress', 'needs-review') OR (s.status = 'closed' AND s.closed_at >= $%d))`, argN)
 		args = append(args, *opts.Since)
 		argN++
 	} else {
-		query += ` AND s.status IN ('open', 'in_progress')`
+		query += ` AND s.status IN ('open', 'ready', 'in_progress', 'needs-review')`
 	}
 
 	if opts.Agent != "" {
@@ -152,7 +160,7 @@ func (c *Client) GetBoardShards(ctx context.Context, opts BoardOpts) (*BoardResu
 		var e BoardEntry
 		var contentLen int
 		if err := rows.Scan(&e.ID, &e.Type, &e.Title, &e.Status, &e.Priority,
-			&contentLen, &e.Creator, &e.UpdatedAt, &e.HasFocus, &e.ChildCount); err != nil {
+			&contentLen, &e.Creator, &e.UpdatedAt, &e.HasFocus, &e.NeedsReview, &e.IsBlocked, &e.ChildCount); err != nil {
 			continue
 		}
 		e.TokenEstimate = contentLen / 4
@@ -173,10 +181,12 @@ func (c *Client) GetBoardShards(ctx context.Context, opts BoardOpts) (*BoardResu
 	// Recent activity: everything within RecentActivityWindow of the most recent update
 	recentCutoff := maxUpdated.Add(-RecentActivityWindow)
 
-	// Partition into focus, recent, and type groups
+	// Partition into focus, needs-review, blocked, recent, and type groups
 	result := &BoardResult{}
-	recentSeen := make(map[string]bool)   // track IDs already in recent
-	focusSeen := make(map[string]bool)     // track IDs already in focus
+	focusSeen := make(map[string]bool)
+	needsReviewSeen := make(map[string]bool)
+	blockedSeen := make(map[string]bool)
+	recentSeen := make(map[string]bool)
 
 	// 1. Focus section
 	for _, e := range allEntries {
@@ -187,9 +197,33 @@ func (c *Client) GetBoardShards(ctx context.Context, opts BoardOpts) (*BoardResu
 		}
 	}
 
-	// 2. Recent activity section (exclude focus items to avoid duplication)
+	// 2. Needs Review section (skip if already in focus)
 	for _, e := range allEntries {
 		if focusSeen[e.ID] {
+			continue
+		}
+		if e.NeedsReview || e.Status == "needs-review" {
+			result.NeedsReview = append(result.NeedsReview, e)
+			result.NeedsReviewTokens += e.TokenEstimate
+			needsReviewSeen[e.ID] = true
+		}
+	}
+
+	// 3. Blocked section (skip if already in focus or needs-review)
+	for _, e := range allEntries {
+		if focusSeen[e.ID] || needsReviewSeen[e.ID] {
+			continue
+		}
+		if e.IsBlocked {
+			result.Blocked = append(result.Blocked, e)
+			result.BlockedTokens += e.TokenEstimate
+			blockedSeen[e.ID] = true
+		}
+	}
+
+	// 4. Recent activity section (exclude items in any above section)
+	for _, e := range allEntries {
+		if focusSeen[e.ID] || needsReviewSeen[e.ID] || blockedSeen[e.ID] {
 			continue
 		}
 		if e.UpdatedAt.After(recentCutoff) {
@@ -199,11 +233,11 @@ func (c *Client) GetBoardShards(ctx context.Context, opts BoardOpts) (*BoardResu
 		}
 	}
 
-	// 3. Type groups (exclude items already shown in focus or recent activity)
+	// 5. Type groups (exclude items already shown in any above section)
 	groupMap := make(map[string]*BoardGroup)
 	var groupOrder []string
 	for _, e := range allEntries {
-		if focusSeen[e.ID] || recentSeen[e.ID] {
+		if focusSeen[e.ID] || needsReviewSeen[e.ID] || blockedSeen[e.ID] || recentSeen[e.ID] {
 			continue
 		}
 		g, exists := groupMap[e.Type]

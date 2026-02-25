@@ -22,7 +22,9 @@ type Styles struct {
 	ExpandIcon  lipgloss.Style
 	ShardID     lipgloss.Style
 	ChildCount  lipgloss.Style
-	GroupTitle   lipgloss.Style
+	GroupTitle        lipgloss.Style
+	GroupNeedsReview lipgloss.Style
+	GroupBlocked     lipgloss.Style
 
 	// Status indicators
 	StatusOpen       lipgloss.Style
@@ -38,6 +40,10 @@ type Styles struct {
 	ChildID        lipgloss.Style
 	ChildTrigger   lipgloss.Style
 	UsageHeader    lipgloss.Style
+
+	// Search
+	SearchInput     lipgloss.Style
+	SearchHighlight lipgloss.Style
 
 	// Status bar
 	StatusBar   lipgloss.Style
@@ -57,8 +63,10 @@ func DefaultStyles() Styles {
 			Padding(0, 1),
 		InactiveTab: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("250")).
+			Background(lipgloss.Color("236")).
 			Padding(0, 1),
 		TabBar: lipgloss.NewStyle().
+			Background(lipgloss.Color("234")).
 			MarginBottom(0),
 
 		ActivePane: lipgloss.NewStyle().
@@ -84,6 +92,12 @@ func DefaultStyles() Styles {
 		GroupTitle: lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("248")),
+		GroupNeedsReview: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("214")),
+		GroupBlocked: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("196")),
 
 		StatusOpen: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("78")),
@@ -113,6 +127,14 @@ func DefaultStyles() Styles {
 		UsageHeader: lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("141")),
+
+		SearchInput: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("15")).
+			Background(lipgloss.Color("236")).
+			Padding(0, 1),
+		SearchHighlight: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("214")).
+			Bold(true),
 
 		StatusBar: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("245")).

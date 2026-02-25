@@ -202,6 +202,101 @@ func GroupByLabel(roots []*TreeNode) []*TreeNode {
 	return groups
 }
 
+// BuildSearchTree converts a ShardContextResult into a hierarchy tree.
+// Returns the tree roots and the flat-list index of the target shard.
+func BuildSearchTree(ctx *client.ShardContextResult) ([]*TreeNode, int) {
+	target := &TreeNode{
+		ID:         ctx.Target.ID,
+		Title:      ctx.Target.Title,
+		Type:       ctx.Target.Type,
+		Status:     ctx.Target.Status,
+		Labels:     ctx.Target.Labels,
+		ChildCount: ctx.Target.ChildCount,
+		Loaded:     true,
+		Expanded:   len(ctx.Children) > 0,
+	}
+
+	// Build children of target
+	for _, c := range ctx.Children {
+		child := &TreeNode{
+			ID:         c.ID,
+			Title:      c.Title,
+			Type:       c.Type,
+			Status:     c.Status,
+			Labels:     c.Labels,
+			ChildCount: c.ChildCount,
+			CreatedAt:  c.CreatedAt,
+			Parent:     target,
+		}
+		target.Children = append(target.Children, child)
+	}
+
+	if ctx.Parent == nil {
+		// No parent: target at depth 0
+		target.Depth = 0
+		setChildDepths(target)
+		flat := Flatten([]*TreeNode{target})
+		return []*TreeNode{target}, indexOf(flat, target.ID)
+	}
+
+	// Parent exists: parent at depth 0, siblings + target at depth 1
+	parent := &TreeNode{
+		ID:         ctx.Parent.ID,
+		Title:      ctx.Parent.Title,
+		Type:       ctx.Parent.Type,
+		Status:     ctx.Parent.Status,
+		Labels:     ctx.Parent.Labels,
+		ChildCount: ctx.Parent.ChildCount,
+		Loaded:     true,
+		Expanded:   true,
+		Depth:      0,
+	}
+
+	// Add siblings before target, then target, preserving order
+	var allChildren []*TreeNode
+	for _, s := range ctx.Siblings {
+		sib := &TreeNode{
+			ID:         s.ID,
+			Title:      s.Title,
+			Type:       s.Type,
+			Status:     s.Status,
+			Labels:     s.Labels,
+			ChildCount: s.ChildCount,
+			CreatedAt:  s.CreatedAt,
+			Depth:      1,
+			Parent:     parent,
+		}
+		allChildren = append(allChildren, sib)
+	}
+
+	target.Depth = 1
+	target.Parent = parent
+	setChildDepths(target)
+	allChildren = append(allChildren, target)
+
+	parent.Children = allChildren
+	parent.ChildCount = len(allChildren)
+
+	flat := Flatten([]*TreeNode{parent})
+	return []*TreeNode{parent}, indexOf(flat, target.ID)
+}
+
+func setChildDepths(node *TreeNode) {
+	for _, c := range node.Children {
+		c.Depth = node.Depth + 1
+		setChildDepths(c)
+	}
+}
+
+func indexOf(flat []*TreeNode, id string) int {
+	for i, n := range flat {
+		if n.ID == id {
+			return i
+		}
+	}
+	return 0
+}
+
 // BuildBoardTree converts a BoardResult into TreeNodes for the board tab.
 func BuildBoardTree(result *client.BoardResult) []*TreeNode {
 	var roots []*TreeNode
@@ -211,6 +306,22 @@ func BuildBoardTree(result *client.BoardResult) []*TreeNode {
 			"group:board:focus",
 			fmt.Sprintf("Focus (%d)", len(result.Focus)),
 			result.Focus,
+		))
+	}
+
+	if len(result.NeedsReview) > 0 {
+		roots = append(roots, boardGroup(
+			"group:board:needs-review",
+			fmt.Sprintf("Needs Review (%d)", len(result.NeedsReview)),
+			result.NeedsReview,
+		))
+	}
+
+	if len(result.Blocked) > 0 {
+		roots = append(roots, boardGroup(
+			"group:board:blocked",
+			fmt.Sprintf("Blocked (%d)", len(result.Blocked)),
+			result.Blocked,
 		))
 	}
 

@@ -1,55 +1,51 @@
-# Context-Palace
+# Context Palace
 
-## My Identity
+You are **Steve** (agent-steve) — the developer and maintainer of Context Palace.
 
-You are **agent-cxp** working on project **penfold** (prefix: `pf-`).
+## Session Start
 
-## Context-Palace (Support System)
+Context is injected automatically by the SessionStart hook on startup/resume.
+The hook provides your instance identity, work queue, and playbook (`pf-a6209a`).
 
-Context-Palace is your **support system** for:
-- Raising issues and reporting bugs
-- Creating and tracking work items
-- Sending messages to other agents
-- Logging actions and storing information
+**Your FIRST response in every session MUST be the work queue table and menu,
+regardless of what James's first message says.** Even if he just says "hi" or "go",
+present the table and ask what to work on. The hook output has the data — use it.
 
-It assists your work - it is not your primary task.
+The playbook is loaded by the hook. Do not reload it.
 
-**Reference docs:**
-- `context-palace.md` - Full usage guide (Quick Reference at top, Common Mistakes section)
-- `pf-rules` - Project rules: `SELECT content FROM shards WHERE id = 'pf-rules';`
+Use `/pickup` to resume from a handoff, or `/implement <spec>` for structured spec work.
 
-**Connection:**
+## Communication Model
+
+Steve does NOT send messages or check inbox. Instead:
+- **Claim shards** to show you're working on them (status → in_progress)
+- **Update shard content** with findings, progress, review details
+- **Set status** `needs-review` when done (`cxp shard status <id> needs-review`)
+- **Label shards** `blocked` when stuck (`cxp shard label add <id> blocked`)
+
+Do NOT check the inbox — context is injected by the hook.
+
+## Configuration
+
+| System | Server | Config |
+|--------|--------|--------|
+| Context Palace | dev02.brown.chat:5432 | ~/.cp/config.yaml |
+
+- **CP usage guide:** context-palace.md
+- **User preferences:** ~/github/otherjamesbrown/penf-cli/docs/preferences.md (NEVER modify)
+
+## Building
+
 ```bash
-psql "host=dev02.brown.chat dbname=contextpalace user=penfold sslmode=verify-full" -c "SQL"
+# CLI
+cd cp && go build -o ~/bin/cxp .
+
+# TUI viewer
+cd cp && go build -o ~/bin/cxpv ./cmd/cxpv/
 ```
 
-## Quick Commands
+## Troubleshooting
 
-```sql
--- Check inbox and tasks
-SELECT * FROM unread_for('penfold', 'agent-cxp');
-SELECT * FROM tasks_for('penfold', 'agent-cxp');
-
--- Send message
-SELECT send_message('penfold', 'agent-cxp', ARRAY['recipient'], 'Subject', 'Body');
-
--- Reply
-SELECT send_message('penfold', 'agent-cxp', ARRAY['sender'], 'Re: Subject', 'Body', NULL, NULL, 'pf-original');
-
--- Mark read
-SELECT mark_read(ARRAY['pf-xxx'], 'agent-cxp');
-
--- Claim and close tasks
-SELECT claim_task('pf-xxx', 'agent-cxp');
-SELECT close_task('pf-xxx', 'Completed: summary');
+```bash
+cxp status
 ```
-
-## Common Mistakes
-
-| Wrong | Correct |
-|-------|---------|
-| `body` | `content` |
-| `shard_type` | `type` |
-| `issues` table | `shards` or `issues` view |
-
-See `context-palace.md` for full schema and function reference.

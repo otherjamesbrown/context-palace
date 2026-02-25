@@ -25,6 +25,7 @@ type KeyMap struct {
 	CollapseAll  key.Binding
 	ToggleClosed key.Binding
 	Refresh      key.Binding
+	Search       key.Binding
 	Quit         key.Binding
 }
 
@@ -106,6 +107,10 @@ func DefaultKeyMap() KeyMap {
 		Refresh: key.NewBinding(
 			key.WithKeys("r"),
 			key.WithHelp("r", "refresh"),
+		),
+		Search: key.NewBinding(
+			key.WithKeys("s"),
+			key.WithHelp("s", "search"),
 		),
 		Quit: key.NewBinding(
 			key.WithKeys("q", "ctrl+c"),

@@ -20,7 +20,7 @@ Parse the input:
 ## Configuration
 
 ```yaml
-AGENT_NAME: agent-cxp
+AGENT_NAME: agent-steve
 PROJECT: penfold
 DB_CONN: "host=dev02.brown.chat dbname=contextpalace user=penfold sslmode=verify-full"
 REPO_ROOT: ~/github/otherjamesbrown/context-palace
@@ -84,12 +84,9 @@ Phase 7 runs once, after the last deliverable.
    - **< 500 LOC total:** proceed with all deliverables
    - **500-1000 LOC:** proceed but checkpoint between deliverables
    - **> 1000 LOC:** implement only the first N deliverables, checkpoint, tell penfold what remains
-4. Send plan to penfold (non-blocking):
-   ```sql
-   SELECT send_message('penfold', 'agent-cxp', ARRAY['agent-penfold'],
-     'Implementation plan: [SPEC-N]',
-     'Deliverables: [count]. Estimated: [LOC]. Order: [list]. Starting with: [first].',
-     NULL, NULL, NULL, NULL, 'review');
+4. Log plan to the work shard:
+   ```bash
+   cxp shard append <shard-id> --body "Implementation plan: [SPEC-N]. Deliverables: [count]. Estimated: [LOC]. Order: [list]. Starting with: [first]."
    ```
 
 **CHECKPOINT after Phase 2.**
@@ -179,10 +176,10 @@ If anything fails, fix it. Do NOT deploy a broken build.
 ### Step 2: Build and install
 
 ```bash
-cd ~/github/otherjamesbrown/context-palace/cp && go build -o /Users/dev/penf-cli/cxp .
+cd ~/github/otherjamesbrown/context-palace/cp && go build -o ~/bin/cxp .
 ```
 
-The binary lives at `/Users/dev/penf-cli/cxp` — this is on PATH and used by all agents
+The binary lives at `~/bin/cxp` — this is on PATH and used by all agents
 (penfold, mycroft, and you). Getting this wrong breaks everyone.
 
 ### Step 3: Verify the installed binary
@@ -193,7 +190,7 @@ cxp status
 
 If `cxp status` fails, the binary is broken. **Revert immediately:**
 ```bash
-cd ~/github/otherjamesbrown/context-palace && git checkout cp/ && go build -o /Users/dev/penf-cli/cxp ./cp/
+cd ~/github/otherjamesbrown/context-palace && git checkout cp/ && go build -o ~/bin/cxp ./cp/
 ```
 Then investigate what went wrong.
 
@@ -211,12 +208,25 @@ cd ~/github/otherjamesbrown/context-palace && git add [specific files] && git co
 cd ~/github/otherjamesbrown/context-palace && git push
 ```
 
-Send resolution to penfold:
-```sql
-SELECT send_message('penfold', 'agent-cxp', ARRAY['agent-penfold'],
-  'Resolved: [SPEC-N title]',
-  E'## Results\n\n- Files: [count] created, [count] modified\n- Tests: [count] passing\n- Coverage: [stats]\n- Binary: installed at /Users/dev/penf-cli/cxp\n- Commit: [hash]\n\n## Evidence\n\n[paste test output + cxp status output]\n\n## Remaining\n\n[any deferred items, or "None"]',
-  NULL, NULL, NULL, NULL, 'done');
+Mark work shard for review:
+```bash
+cxp shard append <shard-id> --body "## Results
+
+- Files: [count] created, [count] modified
+- Tests: [count] passing
+- Coverage: [stats]
+- Binary: installed at ~/bin/cxp
+- Commit: [hash]
+
+## Evidence
+
+[paste test output + cxp status output]
+
+## Remaining
+
+[any deferred items, or None]"
+
+cxp shard status <shard-id> needs-review
 ```
 
 **CHECKPOINT after Phase 7.**
@@ -251,7 +261,7 @@ When stopping early, always:
 1. Ensure current code compiles (`go build ./...`)
 2. Ensure existing tests still pass (`go test ./...`)
 3. Checkpoint with explicit "remaining work" list
-4. Message penfold with what's done and what's left
+4. Log progress to work shard with what's done and what's left
 
 ## Error Handling
 
@@ -262,8 +272,8 @@ When stopping early, always:
 | go vet warning | Fix it immediately, don't defer |
 | Import cycle | Restructure — don't ignore |
 | Existing tests break | You changed behavior — revert and reconsider approach |
-| Spec is ambiguous | Message penfold asking for clarification. Don't guess. |
-| Spec is wrong | Message penfold with evidence. Don't silently deviate. |
+| Spec is ambiguous | Label shard `blocked`, log question. Don't guess. |
+| Spec is wrong | Label shard `blocked`, log evidence. Don't silently deviate. |
 
 ## Definition of Done
 
@@ -279,10 +289,10 @@ The full spec is done when:
 1. All deliverables complete (or explicitly deferred with penfold's agreement)
 2. Full `go test ./...` passes
 3. Coverage report generated
-4. Binary built and installed at `/Users/dev/penf-cli/cxp`
+4. Binary built and installed at `~/bin/cxp`
 5. `cxp status` confirms binary works
 6. Changes committed and pushed
-7. Resolution message sent to penfold with test output + `cxp status` evidence
+7. Work shard marked `needs-review` with test output + `cxp status` evidence
 
 ## Key Principles
 

@@ -93,6 +93,93 @@ func (c *Client) GetShardTreeChildren(ctx context.Context, parentID string, incl
 	return scanTreeNodes(rows)
 }
 
+// ShardContextResult holds a shard and its family (parent, siblings, children)
+type ShardContextResult struct {
+	Target   ShardTreeNode
+	Parent   *ShardTreeNode
+	Siblings []ShardTreeNode
+	Children []ShardTreeNode
+}
+
+// GetShardContext fetches a shard and its family context for search display
+func (c *Client) GetShardContext(ctx context.Context, id string) (*ShardContextResult, error) {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(ctx)
+
+	// Fetch target shard with parent_id (via column or child-of edge)
+	var target ShardTreeNode
+	var parentID *string
+	err = conn.QueryRow(ctx, `
+		SELECT s.id, s.title, s.type, s.status, s.labels,
+			_shard_child_count(s.id, true),
+			s.created_at, s.updated_at,
+			COALESCE(s.parent_id, (
+				SELECT e.to_id FROM edges e
+				WHERE e.from_id = s.id AND e.edge_type = 'child-of'
+				LIMIT 1
+			))
+		FROM shards s
+		WHERE s.id = $1 AND s.project = $2
+	`, id, c.Config.Project).Scan(
+		&target.ID, &target.Title, &target.Type, &target.Status,
+		&target.Labels, &target.ChildCount, &target.CreatedAt, &target.UpdatedAt,
+		&parentID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("shard %s not found", id)
+	}
+
+	result := &ShardContextResult{Target: target}
+
+	// Fetch parent and siblings if parent exists
+	if parentID != nil {
+		var parent ShardTreeNode
+		err = conn.QueryRow(ctx, `
+			SELECT s.id, s.title, s.type, s.status, s.labels,
+				_shard_child_count(s.id, true),
+				s.created_at, s.updated_at
+			FROM shards s WHERE s.id = $1
+		`, *parentID).Scan(
+			&parent.ID, &parent.Title, &parent.Type, &parent.Status,
+			&parent.Labels, &parent.ChildCount, &parent.CreatedAt, &parent.UpdatedAt,
+		)
+		if err == nil {
+			result.Parent = &parent
+		}
+
+		// Fetch siblings (other children of parent, excluding target)
+		sibRows, err := conn.Query(ctx, `
+			SELECT s.id, s.title, s.type, s.status, s.labels,
+				_shard_child_count(s.id, true),
+				s.created_at, s.updated_at
+			FROM shards s
+			WHERE s.id IN (
+				SELECT c.id FROM shards c WHERE c.parent_id = $1
+				UNION
+				SELECT e.from_id FROM edges e
+				WHERE e.to_id = $1 AND e.edge_type = 'child-of'
+			)
+			AND s.id != $2
+			ORDER BY s.created_at
+		`, *parentID, id)
+		if err == nil {
+			defer sibRows.Close()
+			result.Siblings, _ = scanTreeNodes(sibRows)
+		}
+	}
+
+	// Fetch children (reuse existing function)
+	children, err := c.GetShardTreeChildren(ctx, id, true)
+	if err == nil {
+		result.Children = children
+	}
+
+	return result, nil
+}
+
 func scanTreeNodes(rows interface {
 	Next() bool
 	Scan(dest ...any) error

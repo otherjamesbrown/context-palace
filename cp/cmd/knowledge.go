@@ -46,16 +46,8 @@ var kdCreateCmd = &cobra.Command{
 		}
 
 		labels, _ := cmd.Flags().GetStringSlice("label")
-		customID, _ := cmd.Flags().GetString("id")
 
-		var id string
-		if customID != "" {
-			// Use custom ID
-			id, err = cpClient.CreateKnowledgeDocWithID(ctx, customID, title, content, docType, labels)
-		} else {
-			// Auto-generate ID
-			id, err = cpClient.CreateKnowledgeDoc(ctx, title, content, docType, labels)
-		}
+		id, err := cpClient.CreateKnowledgeDoc(ctx, title, content, docType, labels)
 		if err != nil {
 			return err
 		}
@@ -221,20 +213,24 @@ var kdShowCmd = &cobra.Command{
 				}, "", "  ")
 				fmt.Println(string(childJSON))
 			} else {
-				fmt.Printf("\n--- Children (%d) ---\n\n", len(children))
+				fmt.Printf("\n--- Children (%d) ---\n", len(children))
 				for _, ch := range children {
-					fmt.Printf("  %s", ch.ID)
-					if ch.Title != "" {
-						fmt.Printf("  %s", ch.Title)
+					hint := ch.Trigger
+					if hint == "" {
+						hint = ch.Description
 					}
-					fmt.Println()
-					if ch.Description != "" {
-						fmt.Printf("    %s\n", ch.Description)
+					if len(hint) > 40 {
+						hint = hint[:37] + "..."
 					}
-					if ch.Trigger != "" {
-						fmt.Printf("    → %s\n", ch.Trigger)
+					title := ch.Title
+					if len(title) > 30 {
+						title = title[:27] + "..."
 					}
-					fmt.Println()
+					if hint != "" {
+						fmt.Printf("  %-24s %-30s → %s\n", ch.ID, title, hint)
+					} else {
+						fmt.Printf("  %-24s %s\n", ch.ID, title)
+					}
 				}
 			}
 		}
@@ -455,7 +451,6 @@ func init() {
 	kdCreateCmd.Flags().String("body", "", "Document content (inline)")
 	kdCreateCmd.Flags().String("body-file", "", "Read document content from file")
 	kdCreateCmd.Flags().StringSlice("label", nil, "Labels (repeatable)")
-	kdCreateCmd.Flags().String("id", "", "Custom ID/slug for the document (optional, auto-generated if omitted)")
 
 	// list flags
 	kdListCmd.Flags().String("doc-type", "", "Filter by document type")
