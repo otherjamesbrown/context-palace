@@ -140,10 +140,18 @@ var memorySearchCmd = &cobra.Command{
 	Use:     "search <query>",
 	Short:   "Text search memories",
 	Args:    cobra.ExactArgs(1),
-	Example: `  cp memory search "timeout"`,
+	Example: `  cp memory search "timeout"
+  cp memory search "timeout" --label pipeline`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
-		results, err := cpClient.SearchShards(ctx, args[0], "memory", limitFlag)
+
+		labelFlag, _ := cmd.Flags().GetString("label")
+		var labels []string
+		if labelFlag != "" {
+			labels = strings.Split(labelFlag, ",")
+		}
+
+		results, err := cpClient.SearchShardsWithLabels(ctx, args[0], "memory", labels, limitFlag)
 		if err != nil {
 			return err
 		}
@@ -280,6 +288,9 @@ func init() {
 	memoryListCmd.Flags().String("since", "", "Time filter: duration or date")
 	memoryListCmd.Flags().String("status", "open", "Filter by status")
 	memoryListCmd.Flags().Bool("roots", false, "Show only root memories (no parent)")
+
+	// memory search flags
+	memorySearchCmd.Flags().String("label", "", "Filter by label (comma-separated)")
 
 	// memory recall flags
 	memoryRecallCmd.Flags().String("label", "", "Filter by label (comma-separated)")

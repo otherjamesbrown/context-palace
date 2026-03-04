@@ -426,6 +426,59 @@ func (c *Client) SearchShards(ctx context.Context, query string, shardType strin
 	return shards, nil
 }
 
+// SearchShardsWithLabels does full-text search across shards with optional label pre-filtering.
+func (c *Client) SearchShardsWithLabels(ctx context.Context, query string, shardType string, labels []string, limit int) ([]Shard, error) {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(ctx)
+
+	sqlQuery := `
+		SELECT id, project, title, COALESCE(LEFT(content, 200), ''), type, status,
+			priority, creator, owner, created_at, updated_at,
+			COALESCE(metadata, '{}'),
+			ts_rank(search_vector, plainto_tsquery($2)) AS rank
+		FROM shards
+		WHERE project = $1 AND search_vector @@ plainto_tsquery($2)
+	`
+	args := []interface{}{c.Config.Project, query}
+	argIdx := 3
+
+	if shardType != "" {
+		sqlQuery += fmt.Sprintf(` AND type = $%d`, argIdx)
+		args = append(args, shardType)
+		argIdx++
+	}
+	if len(labels) > 0 {
+		sqlQuery += fmt.Sprintf(` AND labels && $%d`, argIdx)
+		args = append(args, labels)
+		argIdx++
+	}
+
+	sqlQuery += fmt.Sprintf(` ORDER BY rank DESC LIMIT $%d`, argIdx)
+	args = append(args, limit)
+
+	rows, err := conn.Query(ctx, sqlQuery, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search shards: %v", err)
+	}
+	defer rows.Close()
+
+	var shards []Shard
+	for rows.Next() {
+		var s Shard
+		var rank float64
+		if err := rows.Scan(&s.ID, &s.Project, &s.Title, &s.Content, &s.Type, &s.Status,
+			&s.Priority, &s.Creator, &s.Owner, &s.CreatedAt, &s.UpdatedAt,
+			&s.Metadata, &rank); err != nil {
+			continue
+		}
+		shards = append(shards, s)
+	}
+	return shards, nil
+}
+
 // ListShardsOpts holds filter options for ListShardsFiltered
 type ListShardsOpts struct {
 	Types     []string
