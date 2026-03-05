@@ -74,6 +74,107 @@ func (c *Client) SemanticSearchWithSince(ctx context.Context, queryEmbedding []f
 	return results, nil
 }
 
+// KBSearchResult represents a knowledge tree search result
+type KBSearchResult struct {
+	ID            string    `json:"id"`
+	Title         string    `json:"title"`
+	Type          string    `json:"type"`
+	Status        string    `json:"status"`
+	Description   string    `json:"description"`
+	TextRank      float64   `json:"text_rank"`
+	Similarity    float64   `json:"similarity"`
+	CombinedScore float64   `json:"combined_score"`
+	Depth         int       `json:"depth"`
+	ParentPath    []string  `json:"parent_path"`
+	Snippet       string    `json:"snippet"`
+	Labels        []string  `json:"labels,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+// KBSearch searches the knowledge tree rooted at rootID using the knowledge_tree_search() function.
+func (c *Client) KBSearch(ctx context.Context, rootID string, query string, queryEmbedding []float32, includeClosed bool, limit int, minSimilarity float64) ([]KBSearchResult, error) {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(ctx)
+
+	var embArg any
+	if queryEmbedding != nil {
+		embArg = pgvec.NewVector(queryEmbedding)
+	}
+	var queryArg any
+	if query != "" {
+		queryArg = query
+	}
+
+	rows, err := conn.Query(ctx, `
+		SELECT id, title, type, status, COALESCE(description,''), text_rank, similarity,
+			combined_score, depth, parent_path, COALESCE(snippet,''), labels, created_at
+		FROM knowledge_tree_search($1, $2, $3, $4, $5, $6, $7)
+	`, c.Config.Project, rootID, queryArg, embArg, includeClosed, limit, minSimilarity)
+	if err != nil {
+		return nil, fmt.Errorf("kb search failed: %v", err)
+	}
+	defer rows.Close()
+
+	var results []KBSearchResult
+	for rows.Next() {
+		var r KBSearchResult
+		if err := rows.Scan(&r.ID, &r.Title, &r.Type, &r.Status, &r.Description,
+			&r.TextRank, &r.Similarity, &r.CombinedScore, &r.Depth,
+			&r.ParentPath, &r.Snippet, &r.Labels, &r.CreatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan kb result: %v", err)
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// KBTreeNode represents a node in the knowledge tree listing
+type KBTreeNode struct {
+	ID          string    `json:"id"`
+	Title       string    `json:"title"`
+	Type        string    `json:"type"`
+	Status      string    `json:"status"`
+	Description string    `json:"description"`
+	ChildCount  int       `json:"child_count"`
+	Depth       int       `json:"depth"`
+	ParentPath  []string  `json:"parent_path"`
+	Labels      []string  `json:"labels,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// KBTree lists the knowledge tree structure from a root shard.
+func (c *Client) KBTree(ctx context.Context, rootID string, maxDepth int, includeClosed bool) ([]KBTreeNode, error) {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(ctx)
+
+	rows, err := conn.Query(ctx, `
+		SELECT id, title, type, status, COALESCE(description,''), child_count,
+			depth, parent_path, labels, created_at
+		FROM knowledge_tree_list($1, $2, $3, $4)
+	`, c.Config.Project, rootID, maxDepth, includeClosed)
+	if err != nil {
+		return nil, fmt.Errorf("kb tree failed: %v", err)
+	}
+	defer rows.Close()
+
+	var nodes []KBTreeNode
+	for rows.Next() {
+		var n KBTreeNode
+		if err := rows.Scan(&n.ID, &n.Title, &n.Type, &n.Status, &n.Description,
+			&n.ChildCount, &n.Depth, &n.ParentPath, &n.Labels, &n.CreatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan kb tree node: %v", err)
+		}
+		nodes = append(nodes, n)
+	}
+	return nodes, rows.Err()
+}
+
 // MemoryRecallResult represents a memory semantic search result
 type MemoryRecallResult struct {
 	ID         string    `json:"id"`

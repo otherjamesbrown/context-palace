@@ -45,6 +45,7 @@ COMMANDS:
   knowledge create|list|show|update|     Knowledge documents
             append|history|diff
   recall "query"                         Semantic search
+  kb search|tree                         Knowledge base search & browse
   epic create|show|list                  Epic management
   focus [set|clear]                      Active epic focus
   shard list|show|create|update|         Shard operations

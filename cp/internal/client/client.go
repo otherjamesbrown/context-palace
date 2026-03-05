@@ -14,13 +14,21 @@ import (
 	"github.com/otherjamesbrown/context-palace/cp/internal/generation"
 )
 
+// KnowledgeBaseConfig holds knowledge base search settings
+type KnowledgeBaseConfig struct {
+	Root          string `yaml:"root"`
+	IncludeClosed bool   `yaml:"include_closed"`
+	DefaultMode   string `yaml:"default_mode"` // text, semantic, hybrid
+}
+
 // Config holds the cp CLI configuration
 type Config struct {
-	Connection ConnectionConfig              `yaml:"connection"`
-	Agent      string                        `yaml:"agent"`
-	Project    string                        `yaml:"project"`
-	Embedding  *embedding.EmbeddingConfig    `yaml:"embedding,omitempty"`
-	Generation *generation.GenerationConfig  `yaml:"generation,omitempty"`
+	Connection    ConnectionConfig              `yaml:"connection"`
+	Agent         string                        `yaml:"agent"`
+	Project       string                        `yaml:"project"`
+	Embedding     *embedding.EmbeddingConfig    `yaml:"embedding,omitempty"`
+	Generation    *generation.GenerationConfig  `yaml:"generation,omitempty"`
+	KnowledgeBase *KnowledgeBaseConfig          `yaml:"knowledge_base,omitempty"`
 }
 
 // ConnectionConfig holds database connection settings

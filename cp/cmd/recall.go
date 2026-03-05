@@ -39,6 +39,48 @@ Use --include-closed to also search closed shards.`,
 		minSim, _ := cmd.Flags().GetFloat64("min-similarity")
 		includeClosed, _ := cmd.Flags().GetBool("include-closed")
 		showSnippet, _ := cmd.Flags().GetBool("show-snippet")
+		kbFlag, _ := cmd.Flags().GetBool("kb")
+
+		// --kb shortcut: delegate to kb search (semantic mode)
+		if kbFlag {
+			rootID := resolveKBRoot()
+			if rootID == "" {
+				return fmt.Errorf("--kb requires knowledge_base.root in config")
+			}
+			if cpClient.EmbedProvider == nil {
+				return fmt.Errorf("--kb requires embedding config for semantic search")
+			}
+			ctx := context.Background()
+			emb, err := cpClient.EmbedProvider.Embed(ctx, query)
+			if err != nil {
+				return fmt.Errorf("failed to embed query: %v", err)
+			}
+			results, err := cpClient.KBSearch(ctx, rootID, "", emb, includeClosed, limitFlag, minSim)
+			if err != nil {
+				return err
+			}
+			if outputFormat == "json" {
+				s, _ := client.FormatJSON(results)
+				fmt.Println(s)
+				return nil
+			}
+			if len(results) == 0 {
+				fmt.Printf("No results above %.2f similarity in knowledge base.\n", minSim)
+				return nil
+			}
+			tbl := client.NewTable("SIMILARITY", "ID", "DEPTH", "TITLE")
+			for _, r := range results {
+				tbl.AddRow(
+					fmt.Sprintf("%.2f", r.Similarity),
+					r.ID,
+					fmt.Sprintf("%d", r.Depth),
+					client.Truncate(r.Title, 50),
+				)
+			}
+			fmt.Print(tbl.String())
+			fmt.Printf("\n%d results (knowledge base, min similarity: %.2f)\n", len(results), minSim)
+			return nil
+		}
 
 		// Validate mutually exclusive flags
 		if statusFlag != "" && includeClosed {
@@ -198,6 +240,7 @@ func init() {
 	recallCmd.Flags().Float64("min-similarity", 0.3, "Minimum similarity threshold (0.0-1.0)")
 	recallCmd.Flags().Bool("include-closed", false, "Include all statuses")
 	recallCmd.Flags().Bool("show-snippet", false, "Show content preview under each result")
+	recallCmd.Flags().Bool("kb", false, "Search knowledge base only (semantic, scoped to KB root)")
 
 	rootCmd.AddCommand(recallCmd)
 }
