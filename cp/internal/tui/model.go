@@ -14,6 +14,18 @@ import (
 	"github.com/otherjamesbrown/context-palace/cp/internal/client"
 )
 
+// Fixed tab indices
+const (
+	tabBoard     = 0
+	tabWork      = 1
+	tabKnowledge = 2
+	tabMemories  = 3
+	tabMessages  = 4
+	tabCount     = 5
+)
+
+var tabNames = [tabCount]string{"Board", "Work", "Knowledge", "Memories", "Messages"}
+
 // BrowseModel is the top-level Bubble Tea model
 type BrowseModel struct {
 	client        *client.Client
@@ -21,9 +33,8 @@ type BrowseModel struct {
 	keys          KeyMap
 	styles        Styles
 
-	// Type tabs
-	types      []client.ShardType
-	activeType int
+	// Tab
+	activeTab int
 
 	// Tree state
 	roots    []*TreeNode
@@ -32,7 +43,6 @@ type BrowseModel struct {
 	nodeMap  map[string]*TreeNode // id -> node for quick lookup
 
 	// Board tab
-	boardMode   bool
 	boardResult *client.BoardResult
 
 	// Detail pane
@@ -73,19 +83,23 @@ func NewBrowseModel(c *client.Client, includeClosed bool) BrowseModel {
 		nodeMap:       make(map[string]*TreeNode),
 		loading:       true,
 		loadingMsg:    "Loading board...",
-		boardMode:     true,
+		activeTab:     tabBoard,
 	}
 }
 
 // -- Messages --
 
-type typesLoadedMsg struct {
-	types []client.ShardType
+type rootsLoadedMsg struct {
+	tab   int
+	nodes []client.ShardTreeNode
 }
 
-type rootsLoadedMsg struct {
-	shardType string
-	nodes     []client.ShardTreeNode
+type workItemsLoadedMsg struct {
+	results []client.ShardListResult
+}
+
+type kbTreeLoadedMsg struct {
+	nodes []client.KBTreeNode
 }
 
 type childrenLoadedMsg struct {
@@ -103,13 +117,13 @@ type boardLoadedMsg struct {
 	result *client.BoardResult
 }
 
-type typesRefreshedMsg struct {
-	types []client.ShardType
-}
-
 type searchLoadedMsg struct {
 	result *client.ShardContextResult
 	raw    string // cxp shard show output for the target
+}
+
+type messagesLoadedMsg struct {
+	results []client.ShardListResult
 }
 
 type errMsg struct {
@@ -117,26 +131,6 @@ type errMsg struct {
 }
 
 // -- Commands --
-
-func (m BrowseModel) loadTypes() tea.Msg {
-	ctx := context.Background()
-	types, err := m.client.GetShardTypes(ctx, m.includeClosed)
-	if err != nil {
-		return errMsg{err}
-	}
-	return typesLoadedMsg{types}
-}
-
-func (m BrowseModel) refreshTypes() tea.Cmd {
-	return func() tea.Msg {
-		ctx := context.Background()
-		types, err := m.client.GetShardTypes(ctx, m.includeClosed)
-		if err != nil {
-			return errMsg{err}
-		}
-		return typesRefreshedMsg{types}
-	}
-}
 
 func (m BrowseModel) loadBoard() tea.Cmd {
 	return func() tea.Msg {
@@ -149,14 +143,65 @@ func (m BrowseModel) loadBoard() tea.Cmd {
 	}
 }
 
-func (m BrowseModel) loadRoots(shardType string) tea.Cmd {
+func (m BrowseModel) loadWorkItems() tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		statuses := []string{"in_progress", "ready", "open", "needs-review"}
+		if m.includeClosed {
+			statuses = append(statuses, "closed", "deferred")
+		}
+		results, err := m.client.ListShardsFiltered(ctx, client.ListShardsOpts{
+			Types:  []string{"task", "bug", "design"},
+			Status: statuses,
+			Limit:  200,
+		})
+		if err != nil {
+			return errMsg{err}
+		}
+		return workItemsLoadedMsg{results: results}
+	}
+}
+
+func (m BrowseModel) loadKBTree() tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		rootID := ""
+		if m.client.Config.KnowledgeBase != nil && m.client.Config.KnowledgeBase.Root != "" {
+			rootID = m.client.Config.KnowledgeBase.Root
+		}
+		if rootID == "" {
+			return errMsg{fmt.Errorf("knowledge_base.root not configured in ~/.cp/config.yaml")}
+		}
+		nodes, err := m.client.KBTree(ctx, rootID, 10, m.includeClosed)
+		if err != nil {
+			return errMsg{err}
+		}
+		return kbTreeLoadedMsg{nodes: nodes}
+	}
+}
+
+func (m BrowseModel) loadRoots(tab int, shardType string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		nodes, err := m.client.GetShardTreeRoots(ctx, shardType, m.includeClosed)
 		if err != nil {
 			return errMsg{err}
 		}
-		return rootsLoadedMsg{shardType: shardType, nodes: nodes}
+		return rootsLoadedMsg{tab: tab, nodes: nodes}
+	}
+}
+
+func (m BrowseModel) loadMessages() tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		results, err := m.client.ListShardsFiltered(ctx, client.ListShardsOpts{
+			Types: []string{"message", "handoff"},
+			Limit: 200,
+		})
+		if err != nil {
+			return errMsg{err}
+		}
+		return messagesLoadedMsg{results: results}
 	}
 }
 
@@ -201,7 +246,7 @@ func (m BrowseModel) loadDetail(id string) tea.Cmd {
 // -- Init --
 
 func (m BrowseModel) Init() tea.Cmd {
-	return tea.Batch(m.loadBoard(), m.loadTypes)
+	return m.loadBoard()
 }
 
 // -- Update --
@@ -226,7 +271,7 @@ func (m BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case boardLoadedMsg:
 		m.boardResult = msg.result
-		if !m.boardMode {
+		if m.activeTab != tabBoard {
 			return m, nil
 		}
 		m.loading = false
@@ -246,40 +291,69 @@ func (m BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.detailID = ""
 		return m, nil
 
-	case typesRefreshedMsg:
-		m.types = msg.types
-		return m, nil
-
-	case typesLoadedMsg:
-		m.types = msg.types
-		if m.boardMode {
-			// Types loaded in background; don't switch away from board
+	case workItemsLoadedMsg:
+		if m.activeTab != tabWork {
 			return m, nil
 		}
 		m.loading = false
-		m.activeType = 0
-		if len(m.types) > 0 {
-			m.loading = true
-			m.loadingMsg = fmt.Sprintf("Loading %s...", m.types[0].Type)
-			return m, m.loadRoots(m.types[0].Type)
+		// Convert ShardListResult to TreeNodes and group by status
+		var nodes []*TreeNode
+		for _, r := range msg.results {
+			nodes = append(nodes, &TreeNode{
+				ID:        r.ID,
+				Title:     r.Title,
+				Type:      r.Type,
+				Status:    r.Status,
+				Labels:    r.Labels,
+				CreatedAt: r.CreatedAt,
+			})
 		}
+		m.roots = GroupByStatus(nodes)
+		m.nodeMap = make(map[string]*TreeNode)
+		for _, root := range m.roots {
+			addToMap(root, m.nodeMap)
+		}
+		m.flatList = Flatten(m.roots)
+		m.cursor = 0
+		m.errMsg = ""
+		if len(m.flatList) > 0 {
+			m, cmd := m.maybeLoadDetail()
+			return m, cmd
+		}
+		m.detail = nil
+		m.detailID = ""
+		return m, nil
+
+	case kbTreeLoadedMsg:
+		if m.activeTab != tabKnowledge {
+			return m, nil
+		}
+		m.loading = false
+		m.roots = BuildKBTreeNodes(msg.nodes)
+		m.nodeMap = make(map[string]*TreeNode)
+		for _, root := range m.roots {
+			addToMap(root, m.nodeMap)
+		}
+		m.flatList = Flatten(m.roots)
+		m.cursor = 0
+		m.errMsg = ""
+		if len(m.flatList) > 0 {
+			m, cmd := m.maybeLoadDetail()
+			return m, cmd
+		}
+		m.detail = nil
+		m.detailID = ""
 		return m, nil
 
 	case rootsLoadedMsg:
-		// Discard stale results
-		if m.boardMode {
-			return m, nil
-		}
-		if len(m.types) > 0 && m.types[m.activeType].Type != msg.shardType {
+		if m.activeTab != msg.tab {
 			return m, nil
 		}
 		m.loading = false
 		m.roots = BuildRoots(msg.nodes)
-		// Apply per-type grouping
-		switch msg.shardType {
-		case "message":
-			m.roots = GroupByDate(m.roots)
-		case "memory":
+		// Apply tab-specific grouping
+		switch m.activeTab {
+		case tabMemories:
 			m.roots = GroupByLabel(m.roots)
 		}
 		m.nodeMap = make(map[string]*TreeNode)
@@ -289,7 +363,39 @@ func (m BrowseModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.flatList = Flatten(m.roots)
 		m.cursor = 0
 		m.errMsg = ""
-		// Auto-load detail for first item
+		if len(m.flatList) > 0 {
+			m, cmd := m.maybeLoadDetail()
+			return m, cmd
+		}
+		m.detail = nil
+		m.detailID = ""
+		return m, nil
+
+	case messagesLoadedMsg:
+		if m.activeTab != tabMessages {
+			return m, nil
+		}
+		m.loading = false
+		// Convert ShardListResult to TreeNodes and group by date
+		var nodes []*TreeNode
+		for _, r := range msg.results {
+			nodes = append(nodes, &TreeNode{
+				ID:        r.ID,
+				Title:     r.Title,
+				Type:      r.Type,
+				Status:    r.Status,
+				Labels:    r.Labels,
+				CreatedAt: r.CreatedAt,
+			})
+		}
+		m.roots = GroupByDate(nodes)
+		m.nodeMap = make(map[string]*TreeNode)
+		for _, root := range m.roots {
+			addToMap(root, m.nodeMap)
+		}
+		m.flatList = Flatten(m.roots)
+		m.cursor = 0
+		m.errMsg = ""
 		if len(m.flatList) > 0 {
 			m, cmd := m.maybeLoadDetail()
 			return m, cmd
@@ -403,52 +509,22 @@ func (m BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.enterSearch()
 	}
 
-	// Type switching: number keys (1=Board, 2-9=shard types)
+	// Tab switching: number keys 1-5
 	if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 {
 		r := msg.Runes[0]
-		if r == '1' {
-			return m.switchToBoard()
-		}
-		if r >= '2' && r <= '9' {
-			idx := int(r - '2') // '2' -> types[0], '3' -> types[1], etc.
-			if idx < len(m.types) {
-				return m.switchType(idx)
-			}
-			return m, nil
+		if r >= '1' && r <= '5' {
+			return m.switchTab(int(r - '1'))
 		}
 	}
 
-	// Type cycling: [ and ] cycle through board + shard types
-	// Total tabs = 1 (board) + len(types)
+	// Tab cycling: [ and ]
 	if key.Matches(msg, m.keys.PrevType) {
-		totalTabs := 1 + len(m.types)
-		if totalTabs <= 1 {
-			return m, nil
-		}
-		current := 0
-		if !m.boardMode {
-			current = m.activeType + 1
-		}
-		prev := (current - 1 + totalTabs) % totalTabs
-		if prev == 0 {
-			return m.switchToBoard()
-		}
-		return m.switchType(prev - 1)
+		prev := (m.activeTab - 1 + tabCount) % tabCount
+		return m.switchTab(prev)
 	}
 	if key.Matches(msg, m.keys.NextType) {
-		totalTabs := 1 + len(m.types)
-		if totalTabs <= 1 {
-			return m, nil
-		}
-		current := 0
-		if !m.boardMode {
-			current = m.activeType + 1
-		}
-		next := (current + 1) % totalTabs
-		if next == 0 {
-			return m.switchToBoard()
-		}
-		return m.switchType(next - 1)
+		next := (m.activeTab + 1) % tabCount
+		return m.switchTab(next)
 	}
 
 	// Shift+Up/Down: scroll by 10 in whichever pane is focused
@@ -562,47 +638,21 @@ func (m BrowseModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if key.Matches(msg, m.keys.ToggleClosed) {
 		m.includeClosed = !m.includeClosed
-		m.loading = true
-		m.loadingMsg = "Reloading..."
-		m.roots = nil
-		m.flatList = nil
-		m.nodeMap = make(map[string]*TreeNode)
-		m.cursor = 0
-		m.detail = nil
-		m.detailID = ""
-		if m.boardMode {
-			return m, tea.Batch(m.loadBoard(), m.loadTypes)
-		}
-		return m, m.loadTypes
+		return m.reloadCurrentTab()
 	}
 
 	if key.Matches(msg, m.keys.Refresh) {
-		m.loading = true
-		m.loadingMsg = "Refreshing..."
-		m.roots = nil
-		m.flatList = nil
-		m.nodeMap = make(map[string]*TreeNode)
-		m.cursor = 0
-		m.detail = nil
-		m.detailID = ""
-		if m.boardMode {
-			return m, tea.Batch(m.loadBoard(), m.refreshTypes())
-		}
-		if len(m.types) > 0 {
-			return m, tea.Batch(m.refreshTypes(), m.loadRoots(m.types[m.activeType].Type))
-		}
-		return m, m.loadTypes
+		return m.reloadCurrentTab()
 	}
 
 	return m, nil
 }
 
-func (m BrowseModel) switchType(idx int) (tea.Model, tea.Cmd) {
-	if idx == m.activeType && !m.boardMode && m.searchResult == nil {
+func (m BrowseModel) switchTab(tab int) (tea.Model, tea.Cmd) {
+	if tab == m.activeTab && m.searchResult == nil {
 		return m, nil
 	}
-	m.activeType = idx
-	m.boardMode = false
+	m.activeTab = tab
 	m.searchMode = false
 	m.searchResult = nil
 	m.searchErr = ""
@@ -613,27 +663,37 @@ func (m BrowseModel) switchType(idx int) (tea.Model, tea.Cmd) {
 	m.detail = nil
 	m.detailID = ""
 	m.loading = true
-	m.loadingMsg = fmt.Sprintf("Loading %s...", m.types[idx].Type)
-	return m, m.loadRoots(m.types[idx].Type)
+	m.loadingMsg = fmt.Sprintf("Loading %s...", tabNames[tab])
+	return m, m.loadTabCmd(tab)
 }
 
-func (m BrowseModel) switchToBoard() (tea.Model, tea.Cmd) {
-	if m.boardMode && m.searchResult == nil {
-		return m, nil
+func (m BrowseModel) loadTabCmd(tab int) tea.Cmd {
+	switch tab {
+	case tabBoard:
+		return m.loadBoard()
+	case tabWork:
+		return m.loadWorkItems()
+	case tabKnowledge:
+		return m.loadKBTree()
+	case tabMemories:
+		return m.loadRoots(tabMemories, "memory")
+	case tabMessages:
+		return m.loadMessages()
+	default:
+		return nil
 	}
-	m.boardMode = true
-	m.searchMode = false
-	m.searchResult = nil
-	m.searchErr = ""
+}
+
+func (m BrowseModel) reloadCurrentTab() (tea.Model, tea.Cmd) {
+	m.loading = true
+	m.loadingMsg = "Reloading..."
 	m.roots = nil
 	m.flatList = nil
 	m.nodeMap = make(map[string]*TreeNode)
 	m.cursor = 0
 	m.detail = nil
 	m.detailID = ""
-	m.loading = true
-	m.loadingMsg = "Loading board..."
-	return m, m.loadBoard()
+	return m, m.loadTabCmd(m.activeTab)
 }
 
 func (m BrowseModel) toggleExpand() (tea.Model, tea.Cmd) {
@@ -716,13 +776,7 @@ func (m BrowseModel) exitSearch() (tea.Model, tea.Cmd) {
 	m.detailRaw = ""
 	m.loading = true
 	m.loadingMsg = "Reloading..."
-	if m.boardMode {
-		return m, tea.Batch(m.loadBoard(), m.refreshTypes())
-	}
-	if len(m.types) > 0 {
-		return m, tea.Batch(m.refreshTypes(), m.loadRoots(m.types[m.activeType].Type))
-	}
-	return m, m.loadTypes
+	return m, m.loadTabCmd(m.activeTab)
 }
 
 func (m BrowseModel) handleSearchInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -832,17 +886,9 @@ func (m BrowseModel) View() string {
 func (m BrowseModel) renderTabs() string {
 	var tabs []string
 
-	// Board tab (always first)
-	boardLabel := "1:Board"
-	if m.boardMode && m.searchResult == nil {
-		tabs = append(tabs, m.styles.ActiveTab.Render(boardLabel))
-	} else {
-		tabs = append(tabs, m.styles.InactiveTab.Render(boardLabel))
-	}
-
-	for i, t := range m.types {
-		label := fmt.Sprintf("%d:%s (%d)", i+2, t.Type, t.Count)
-		if !m.boardMode && i == m.activeType && m.searchResult == nil {
+	for i, name := range tabNames {
+		label := fmt.Sprintf("%d:%s", i+1, name)
+		if i == m.activeTab && m.searchResult == nil {
 			tabs = append(tabs, m.styles.ActiveTab.Render(label))
 		} else {
 			tabs = append(tabs, m.styles.InactiveTab.Render(label))
@@ -883,7 +929,8 @@ func (m BrowseModel) renderBanner() string {
 		return b.String()
 	}
 
-	if m.boardMode {
+	switch m.activeTab {
+	case tabBoard:
 		if m.boardResult == nil {
 			return ""
 		}
@@ -901,23 +948,29 @@ func (m BrowseModel) renderBanner() string {
 			parts = append(parts, m.styles.Muted.Render(fmt.Sprintf("%d memories", m.boardResult.MemoryCount)))
 		}
 		return fmt.Sprintf(" %s\n\n", strings.Join(parts, "  "))
+
+	case tabWork:
+		workStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214"))
+		return fmt.Sprintf(" %s  %s\n\n",
+			workStyle.Render("WORK"),
+			m.styles.Muted.Render("tasks + bugs + designs"))
+
+	case tabKnowledge:
+		kbStyle := lipgloss.NewStyle().Bold(true).Foreground(TypeColor("knowledge"))
+		return fmt.Sprintf(" %s\n\n", kbStyle.Render("KNOWLEDGE"))
+
+	case tabMemories:
+		memStyle := lipgloss.NewStyle().Bold(true).Foreground(TypeColor("memory"))
+		return fmt.Sprintf(" %s\n\n", memStyle.Render("MEMORIES"))
+
+	case tabMessages:
+		msgStyle := lipgloss.NewStyle().Bold(true).Foreground(TypeColor("message"))
+		return fmt.Sprintf(" %s  %s\n\n",
+			msgStyle.Render("MESSAGES"),
+			m.styles.Muted.Render("messages + handoffs"))
 	}
 
-	if len(m.types) == 0 || m.activeType >= len(m.types) {
-		return ""
-	}
-	t := m.types[m.activeType]
-
-	typeStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(TypeColor(t.Type))
-
-	name := typeStyle.Render(strings.ToUpper(t.Type))
-
-	open := m.styles.StatusOpen.Render(fmt.Sprintf("%d open", t.OpenCount))
-	closed := m.styles.StatusClosed.Render(fmt.Sprintf("%d closed", t.ClosedCount))
-
-	return fmt.Sprintf(" %s  %s  %s\n\n", name, open, closed)
+	return ""
 }
 
 func (m BrowseModel) renderTree() string {
@@ -990,12 +1043,12 @@ func (m BrowseModel) renderTreeLine(node *TreeNode, isCursor bool) string {
 		if len(title) > maxTitleLen && maxTitleLen > 3 {
 			title = title[:maxTitleLen-3] + "..."
 		}
-		// Pick style based on board group ID
+		// Pick style based on group ID
 		groupStyle := m.styles.GroupTitle
-		switch node.ID {
-		case "group:board:needs-review":
+		switch {
+		case node.ID == "group:board:needs-review" || node.ID == "group:status:needs-review":
 			groupStyle = m.styles.GroupNeedsReview
-		case "group:board:blocked":
+		case node.ID == "group:board:blocked":
 			groupStyle = m.styles.GroupBlocked
 		}
 		groupTitle := groupStyle.Render(title)
@@ -1074,8 +1127,8 @@ func (m BrowseModel) renderStatusBar() string {
 		help = []struct{ key, desc string }{
 			{"j/k", "nav"},
 			{"h/l", "tree"},
-			{"1", "board"},
-			{"[/]", "type"},
+			{"1-5", "tabs"},
+			{"[/]", "cycle"},
 			{"s", "search"},
 			{"r", "refresh"},
 			{"c", "closed"},
@@ -1099,7 +1152,7 @@ func (m BrowseModel) renderStatusBar() string {
 	if len(m.flatList) > 0 {
 		right = append(right, fmt.Sprintf("%d/%d", m.cursor+1, len(m.flatList)))
 	}
-	right = append(right, s.StatusBar.Render("v0.2.0"))
+	right = append(right, s.StatusBar.Render("v0.3.0"))
 	pos := strings.Join(right, s.StatusBar.Render("  "))
 
 	gap := m.width - lipgloss.Width(bar) - lipgloss.Width(pos) - 2

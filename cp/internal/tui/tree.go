@@ -202,6 +202,128 @@ func GroupByLabel(roots []*TreeNode) []*TreeNode {
 	return groups
 }
 
+// GroupByStatus groups root nodes by workflow status in a fixed order.
+// Order: In Progress > Ready > Open > Needs Review > Closed > Deferred
+func GroupByStatus(roots []*TreeNode) []*TreeNode {
+	statusOrder := []string{"in_progress", "ready", "open", "needs-review", "closed", "deferred"}
+	statusLabels := map[string]string{
+		"in_progress":  "In Progress",
+		"ready":        "Ready",
+		"open":         "Open",
+		"needs-review": "Needs Review",
+		"closed":       "Closed",
+		"deferred":     "Deferred",
+	}
+
+	buckets := make(map[string][]*TreeNode)
+	for _, r := range roots {
+		buckets[r.Status] = append(buckets[r.Status], r)
+	}
+
+	var groups []*TreeNode
+	for _, status := range statusOrder {
+		children, ok := buckets[status]
+		if !ok || len(children) == 0 {
+			continue
+		}
+		label := statusLabels[status]
+		if label == "" {
+			label = status
+		}
+		g := &TreeNode{
+			ID:         "group:status:" + status,
+			Title:      label,
+			IsGroup:    true,
+			Loaded:     true,
+			Expanded:   status != "closed" && status != "deferred",
+			ChildCount: len(children),
+			Depth:      0,
+		}
+		for _, c := range children {
+			c.Parent = g
+			c.Depth = 1
+		}
+		g.Children = children
+		groups = append(groups, g)
+	}
+
+	// Any statuses not in the predefined order
+	for status, children := range buckets {
+		found := false
+		for _, s := range statusOrder {
+			if s == status {
+				found = true
+				break
+			}
+		}
+		if !found {
+			g := &TreeNode{
+				ID:         "group:status:" + status,
+				Title:      status,
+				IsGroup:    true,
+				Loaded:     true,
+				Expanded:   true,
+				ChildCount: len(children),
+				Depth:      0,
+			}
+			for _, c := range children {
+				c.Parent = g
+				c.Depth = 1
+			}
+			g.Children = children
+			groups = append(groups, g)
+		}
+	}
+
+	return groups
+}
+
+// BuildKBTreeNodes converts KBTreeNode slices into a hierarchical TreeNode tree.
+// KBTreeNodes come pre-ordered with depth info from the DB function.
+func BuildKBTreeNodes(nodes []client.KBTreeNode) []*TreeNode {
+	if len(nodes) == 0 {
+		return nil
+	}
+
+	// Build flat nodes first
+	nodeMap := make(map[string]*TreeNode)
+	var allNodes []*TreeNode
+	for _, n := range nodes {
+		tn := &TreeNode{
+			ID:         n.ID,
+			Title:      n.Title,
+			Type:       n.Type,
+			Status:     n.Status,
+			Labels:     n.Labels,
+			ChildCount: n.ChildCount,
+			Depth:      n.Depth,
+			CreatedAt:  n.CreatedAt,
+			Loaded:     true,
+			Expanded:   n.Depth < 2, // expand first 2 levels
+		}
+		nodeMap[n.ID] = tn
+		allNodes = append(allNodes, tn)
+	}
+
+	// Wire parent-child relationships using ParentPath
+	var roots []*TreeNode
+	for i, n := range nodes {
+		tn := allNodes[i]
+		if len(n.ParentPath) > 0 {
+			parentID := n.ParentPath[len(n.ParentPath)-1]
+			if parent, ok := nodeMap[parentID]; ok {
+				tn.Parent = parent
+				parent.Children = append(parent.Children, tn)
+				continue
+			}
+		}
+		// No parent found — treat as root
+		roots = append(roots, tn)
+	}
+
+	return roots
+}
+
 // BuildSearchTree converts a ShardContextResult into a hierarchy tree.
 // Returns the tree roots and the flat-list index of the target shard.
 func BuildSearchTree(ctx *client.ShardContextResult) ([]*TreeNode, int) {

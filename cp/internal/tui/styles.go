@@ -27,9 +27,12 @@ type Styles struct {
 	GroupBlocked     lipgloss.Style
 
 	// Status indicators
-	StatusOpen       lipgloss.Style
-	StatusClosed     lipgloss.Style
-	StatusInProgress lipgloss.Style
+	StatusOpen        lipgloss.Style
+	StatusClosed      lipgloss.Style
+	StatusInProgress  lipgloss.Style
+	StatusReady       lipgloss.Style
+	StatusNeedsReview lipgloss.Style
+	StatusDeferred    lipgloss.Style
 
 	// Detail pane
 	DetailTitle    lipgloss.Style
@@ -105,6 +108,12 @@ func DefaultStyles() Styles {
 			Foreground(lipgloss.Color("245")),
 		StatusInProgress: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("214")),
+		StatusReady: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("44")), // cyan/teal
+		StatusNeedsReview: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("208")), // orange (different shade)
+		StatusDeferred: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240")), // grey/dim
 
 		DetailTitle: lipgloss.NewStyle().
 			Bold(true).
@@ -153,24 +162,20 @@ func DefaultStyles() Styles {
 // TypeIcon returns a single-char icon for a shard type
 func TypeIcon(shardType string) string {
 	switch shardType {
-	case "memory":
-		return "M"
 	case "task":
 		return "T"
-	case "knowledge":
-		return "K"
-	case "epic":
-		return "E"
 	case "bug":
 		return "B"
-	case "backlog":
-		return "b"
+	case "design":
+		return "D"
+	case "knowledge":
+		return "K"
+	case "memory":
+		return "M"
 	case "message":
 		return "m"
-	case "session":
-		return "S"
-	case "note":
-		return "n"
+	case "handoff":
+		return "H"
 	default:
 		return "*"
 	}
@@ -179,21 +184,19 @@ func TypeIcon(shardType string) string {
 // TypeColor returns a color for a shard type
 func TypeColor(shardType string) lipgloss.Color {
 	switch shardType {
-	case "memory":
-		return lipgloss.Color("141") // purple
 	case "task":
 		return lipgloss.Color("214") // orange
-	case "knowledge":
-		return lipgloss.Color("78") // green
-	case "epic":
-		return lipgloss.Color("39") // blue
 	case "bug":
 		return lipgloss.Color("196") // red
-	case "backlog":
-		return lipgloss.Color("245") // gray
+	case "design":
+		return lipgloss.Color("39") // blue
+	case "knowledge":
+		return lipgloss.Color("78") // green
+	case "memory":
+		return lipgloss.Color("141") // purple
 	case "message":
 		return lipgloss.Color("220") // yellow
-	case "session":
+	case "handoff":
 		return lipgloss.Color("117") // light blue
 	case "board":
 		return lipgloss.Color("44") // cyan

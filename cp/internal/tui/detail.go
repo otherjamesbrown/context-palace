@@ -145,6 +145,12 @@ func renderStatus(status string, styles Styles) string {
 		return styles.StatusClosed.Render(status)
 	case "in_progress":
 		return styles.StatusInProgress.Render(status)
+	case "ready":
+		return styles.StatusReady.Render(status)
+	case "needs-review":
+		return styles.StatusNeedsReview.Render(status)
+	case "deferred":
+		return styles.StatusDeferred.Render(status)
 	default:
 		return status
 	}
