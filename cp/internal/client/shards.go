@@ -344,6 +344,49 @@ func (c *Client) UpdateShardContent(ctx context.Context, id, content string) err
 	return nil
 }
 
+// AppendShardContent appends content to a shard with a separator showing
+// timestamp and agent identity. Works on any shard type.
+func (c *Client) AppendShardContent(ctx context.Context, id, newContent string) error {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close(ctx)
+
+	// Read existing content
+	var existing, shardType, title string
+	err = conn.QueryRow(ctx, `SELECT COALESCE(content, ''), type, title FROM shards WHERE id = $1`, id).
+		Scan(&existing, &shardType, &title)
+	if err != nil {
+		return fmt.Errorf("shard not found: %s", id)
+	}
+
+	// Build separator with timestamp and agent
+	agent := c.Config.Agent
+	if agent == "" {
+		agent = "unknown"
+	}
+	separator := fmt.Sprintf("\n\n---\n*Appended by %s at %s*\n\n",
+		agent, time.Now().UTC().Format("2006-01-02 15:04 UTC"))
+
+	combined := existing + separator + newContent
+
+	result, err := conn.Exec(ctx, `
+		UPDATE shards SET content = $1, updated_at = NOW() WHERE id = $2
+	`, combined, id)
+	if err != nil {
+		return fmt.Errorf("failed to append to shard: %v", err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("shard not found: %s", id)
+	}
+
+	// Embed-on-write
+	c.tryEmbed(ctx, id, shardType, title, combined)
+
+	return nil
+}
+
 // UpdateShardStatus updates a shard's status
 func (c *Client) UpdateShardStatus(ctx context.Context, id, status string) error {
 	conn, err := c.Connect(ctx)

@@ -748,7 +748,51 @@ func inferJSONValue(s string) interface{} {
 	return s
 }
 
+// -- shard append --
+
+var shardAppendCmd = &cobra.Command{
+	Use:   "append <shard-id>",
+	Short: "Append content to any shard",
+	Args:  cobra.ExactArgs(1),
+	Example: `  cxp shard append pf-task-123 --body "## Update\nCompleted code review."
+  cxp shard append pf-bug-456 --body-file /tmp/findings.md`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		id := args[0]
+
+		body, _ := cmd.Flags().GetString("body")
+		bodyFile, _ := cmd.Flags().GetString("body-file")
+
+		content, err := resolveBody(body, bodyFile)
+		if err != nil {
+			return err
+		}
+
+		err = cpClient.AppendShardContent(ctx, id, content)
+		if err != nil {
+			return err
+		}
+
+		if outputFormat == "json" {
+			out := map[string]any{
+				"id":       id,
+				"appended": true,
+			}
+			s, _ := client.FormatJSON(out)
+			fmt.Println(s)
+			return nil
+		}
+
+		fmt.Printf("Appended to %s\n", id)
+		return nil
+	},
+}
+
 func init() {
+	// shard append flags
+	shardAppendCmd.Flags().String("body", "", "Content to append (inline)")
+	shardAppendCmd.Flags().String("body-file", "", "Content to append from file")
+
 	// shard query flags
 	shardQueryCmd.Flags().String("type", "", "Shard type filter")
 	shardQueryCmd.Flags().String("meta", "", "Metadata filter (key=value or JSON)")
@@ -793,6 +837,7 @@ func init() {
 	shardCmd.AddCommand(shardUpdateCmd)
 	shardCmd.AddCommand(shardCloseCmd)
 	shardCmd.AddCommand(shardReopenCmd)
+	shardCmd.AddCommand(shardAppendCmd)
 
 	rootCmd.AddCommand(shardCmd)
 }
