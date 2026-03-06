@@ -133,16 +133,19 @@ func (c *Client) KBSearch(ctx context.Context, rootID string, query string, quer
 
 // KBTreeNode represents a node in the knowledge tree listing
 type KBTreeNode struct {
-	ID          string    `json:"id"`
-	Title       string    `json:"title"`
-	Type        string    `json:"type"`
-	Status      string    `json:"status"`
-	Description string    `json:"description"`
-	ChildCount  int       `json:"child_count"`
-	Depth       int       `json:"depth"`
-	ParentPath  []string  `json:"parent_path"`
-	Labels      []string  `json:"labels,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID              string    `json:"id"`
+	Title           string    `json:"title"`
+	Type            string    `json:"type"`
+	Status          string    `json:"status"`
+	Description     string    `json:"description"`
+	ChildCount      int       `json:"child_count"`
+	Depth           int       `json:"depth"`
+	ParentPath      []string  `json:"parent_path"`
+	Labels          []string  `json:"labels,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	EdgeTrigger     *string   `json:"edge_trigger,omitempty"`
+	EdgeDescription *string   `json:"edge_description,omitempty"`
+	EdgeOrdering    *int      `json:"edge_ordering,omitempty"`
 }
 
 // KBTree lists the knowledge tree structure from a root shard.
@@ -155,7 +158,8 @@ func (c *Client) KBTree(ctx context.Context, rootID string, maxDepth int, includ
 
 	rows, err := conn.Query(ctx, `
 		SELECT id, title, type, status, COALESCE(description,''), child_count,
-			depth, parent_path, labels, created_at
+			depth, parent_path, labels, created_at,
+			edge_trigger, edge_description, edge_ordering
 		FROM knowledge_tree_list($1, $2, $3, $4)
 	`, c.Config.Project, rootID, maxDepth, includeClosed)
 	if err != nil {
@@ -167,8 +171,57 @@ func (c *Client) KBTree(ctx context.Context, rootID string, maxDepth int, includ
 	for rows.Next() {
 		var n KBTreeNode
 		if err := rows.Scan(&n.ID, &n.Title, &n.Type, &n.Status, &n.Description,
-			&n.ChildCount, &n.Depth, &n.ParentPath, &n.Labels, &n.CreatedAt); err != nil {
+			&n.ChildCount, &n.Depth, &n.ParentPath, &n.Labels, &n.CreatedAt,
+			&n.EdgeTrigger, &n.EdgeDescription, &n.EdgeOrdering); err != nil {
 			return nil, fmt.Errorf("failed to scan kb tree node: %v", err)
+		}
+		nodes = append(nodes, n)
+	}
+	return nodes, rows.Err()
+}
+
+// KBRoots discovers knowledge base root shards — knowledge shards that have
+// children (incoming child-of edges) but no parent (no outgoing child-of edge).
+// Returns them ordered by title.
+func (c *Client) KBRoots(ctx context.Context, includeClosed bool) ([]KBTreeNode, error) {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(ctx)
+
+	statusFilter := ""
+	if !includeClosed {
+		statusFilter = "AND s.status NOT IN ('closed', 'deferred')"
+	}
+
+	query := fmt.Sprintf(`
+		SELECT s.id, s.title, s.type, s.status, COALESCE(s.content, ''),
+			(SELECT count(*) FROM edges e2 WHERE e2.to_id = s.id AND e2.edge_type = 'child-of') AS child_count,
+			0 AS depth, ARRAY[]::text[] AS parent_path, s.labels, s.created_at,
+			NULL::text, NULL::text, NULL::int
+		FROM shards s
+		LEFT JOIN edges e ON s.id = e.from_id AND e.edge_type = 'child-of'
+		WHERE s.project = $1 AND s.type = 'knowledge'
+		AND e.to_id IS NULL
+		AND EXISTS (SELECT 1 FROM edges e2 WHERE e2.to_id = s.id AND e2.edge_type = 'child-of')
+		%s
+		ORDER BY s.title
+	`, statusFilter)
+
+	rows, err := conn.Query(ctx, query, c.Config.Project)
+	if err != nil {
+		return nil, fmt.Errorf("kb roots query failed: %v", err)
+	}
+	defer rows.Close()
+
+	var nodes []KBTreeNode
+	for rows.Next() {
+		var n KBTreeNode
+		if err := rows.Scan(&n.ID, &n.Title, &n.Type, &n.Status, &n.Description,
+			&n.ChildCount, &n.Depth, &n.ParentPath, &n.Labels, &n.CreatedAt,
+			&n.EdgeTrigger, &n.EdgeDescription, &n.EdgeOrdering); err != nil {
+			return nil, fmt.Errorf("failed to scan kb root: %v", err)
 		}
 		nodes = append(nodes, n)
 	}

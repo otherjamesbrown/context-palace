@@ -165,18 +165,31 @@ func (m BrowseModel) loadWorkItems() tea.Cmd {
 func (m BrowseModel) loadKBTree() tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		rootID := ""
-		if m.client.Config.KnowledgeBase != nil && m.client.Config.KnowledgeBase.Root != "" {
-			rootID = m.client.Config.KnowledgeBase.Root
-		}
-		if rootID == "" {
-			return errMsg{fmt.Errorf("knowledge_base.root not configured in ~/.cp/config.yaml")}
-		}
-		nodes, err := m.client.KBTree(ctx, rootID, 10, m.includeClosed)
+		// Auto-discover KB roots (knowledge shards with children but no parent)
+		roots, err := m.client.KBRoots(ctx, m.includeClosed)
 		if err != nil {
 			return errMsg{err}
 		}
-		return kbTreeLoadedMsg{nodes: nodes}
+		if len(roots) == 0 {
+			return kbTreeLoadedMsg{nodes: nil}
+		}
+		// Load full subtree for each root
+		var allNodes []client.KBTreeNode
+		for _, root := range roots {
+			// Include the root itself as a depth-0 node
+			allNodes = append(allNodes, root)
+			children, err := m.client.KBTree(ctx, root.ID, 10, m.includeClosed)
+			if err != nil {
+				continue // skip roots we can't expand
+			}
+			// Shift child depths down by 1 to nest under the root
+			for i := range children {
+				children[i].Depth++
+				children[i].ParentPath = append([]string{root.ID}, children[i].ParentPath...)
+			}
+			allNodes = append(allNodes, children...)
+		}
+		return kbTreeLoadedMsg{nodes: allNodes}
 	}
 }
 
@@ -224,7 +237,7 @@ func (m BrowseModel) loadSearch(id string) tea.Cmd {
 			return searchLoadedMsg{} // will show error via empty result
 		}
 		// Get raw detail output
-		out, _ := exec.Command("cxp", "shard", "show", id).Output()
+		out, _ := exec.Command("cxp", "shard", "show", id, "-o", "plain").Output()
 		return searchLoadedMsg{result: result, raw: string(out)}
 	}
 }
@@ -232,7 +245,7 @@ func (m BrowseModel) loadSearch(id string) tea.Cmd {
 func (m BrowseModel) loadDetail(id string) tea.Cmd {
 	return func() tea.Msg {
 		// Use cxp shard show for rendering
-		out, err := exec.Command("cxp", "shard", "show", id).Output()
+		out, err := exec.Command("cxp", "shard", "show", id, "-o", "plain").Output()
 		if err != nil {
 			return errMsg{fmt.Errorf("cxp shard show %s: %w", id, err)}
 		}
@@ -1075,7 +1088,20 @@ func (m BrowseModel) renderTreeLine(node *TreeNode, isCursor bool) string {
 			title = m.styles.SearchHighlight.Render(title)
 		}
 
-		line = fmt.Sprintf("%s%s%s %s%s", indent, icon, typeIcon, title, childHint)
+		// Edge trigger hint for knowledge tree nodes
+		triggerHint := ""
+		if node.EdgeTrigger != "" && m.activeTab == tabKnowledge {
+			available := m.treeWidth - (node.Depth*2 + 6 + len(node.Title) + len(childHint) + 5)
+			if available > 10 {
+				trigger := node.EdgeTrigger
+				if len(trigger) > available {
+					trigger = trigger[:available-3] + "..."
+				}
+				triggerHint = m.styles.Muted.Render("  → " + trigger)
+			}
+		}
+
+		line = fmt.Sprintf("%s%s%s %s%s%s", indent, icon, typeIcon, title, childHint, triggerHint)
 	}
 
 	if isCursor {

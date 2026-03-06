@@ -10,19 +10,21 @@ import (
 
 // TreeNode represents a node in the navigable tree
 type TreeNode struct {
-	ID         string
-	Title      string
-	Type       string
-	Status     string
-	Labels     []string
-	ChildCount int
-	Depth      int
-	Expanded   bool
-	Loaded     bool // true if children have been fetched
-	IsGroup    bool // virtual group node (not a real shard)
-	CreatedAt  time.Time
-	Parent     *TreeNode
-	Children   []*TreeNode
+	ID              string
+	Title           string
+	Type            string
+	Status          string
+	Labels          []string
+	ChildCount      int
+	Depth           int
+	Expanded        bool
+	Loaded          bool // true if children have been fetched
+	IsGroup         bool // virtual group node (not a real shard)
+	CreatedAt       time.Time
+	Parent          *TreeNode
+	Children        []*TreeNode
+	EdgeTrigger     string // edge trigger text (knowledge tree)
+	EdgeDescription string // edge description text (knowledge tree)
 }
 
 // BuildRoots converts ShardTreeNode slices into TreeNode roots
@@ -300,6 +302,12 @@ func BuildKBTreeNodes(nodes []client.KBTreeNode) []*TreeNode {
 			CreatedAt:  n.CreatedAt,
 			Loaded:     true,
 			Expanded:   n.Depth < 2, // expand first 2 levels
+		}
+		if n.EdgeTrigger != nil {
+			tn.EdgeTrigger = *n.EdgeTrigger
+		}
+		if n.EdgeDescription != nil {
+			tn.EdgeDescription = *n.EdgeDescription
 		}
 		nodeMap[n.ID] = tn
 		allNodes = append(allNodes, tn)
