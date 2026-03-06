@@ -17,8 +17,14 @@ import (
 // KnowledgeBaseConfig holds knowledge base search settings
 type KnowledgeBaseConfig struct {
 	Root          string `yaml:"root"`
+	Unsorted      string `yaml:"unsorted"`
 	IncludeClosed bool   `yaml:"include_closed"`
 	DefaultMode   string `yaml:"default_mode"` // text, semantic, hybrid
+}
+
+// DefaultsConfig holds default flag values
+type DefaultsConfig struct {
+	Output string `yaml:"output"` // default output format (text|json|yaml)
 }
 
 // Config holds the cp CLI configuration
@@ -29,6 +35,7 @@ type Config struct {
 	Embedding     *embedding.EmbeddingConfig    `yaml:"embedding,omitempty"`
 	Generation    *generation.GenerationConfig  `yaml:"generation,omitempty"`
 	KnowledgeBase *KnowledgeBaseConfig          `yaml:"knowledge_base,omitempty"`
+	Defaults      *DefaultsConfig               `yaml:"defaults,omitempty"`
 }
 
 // ConnectionConfig holds database connection settings

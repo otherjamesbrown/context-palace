@@ -208,6 +208,9 @@ var shardCreateCmd = &cobra.Command{
 		if shardType == "" {
 			return fmt.Errorf("--type is required")
 		}
+		if err := client.ValidateShardType(shardType); err != nil {
+			return err
+		}
 		if title == "" {
 			return fmt.Errorf("--title is required")
 		}

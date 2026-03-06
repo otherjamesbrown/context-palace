@@ -24,37 +24,30 @@ var Version = "0.1.0"
 var rootCmd = &cobra.Command{
 	Use:   "cp",
 	Short: "Context Palace CLI",
-	Long: `Context Palace — project-agnostic developer tooling for requirements management,
-knowledge documents, semantic search, agent memory, and work tracking.
+	Long: `Context Palace — project-agnostic developer tooling for knowledge management,
+semantic search, agent memory, and work tracking.
 
 COMMANDS:
-  status                             Connection + project info
-  init                               Create .cp.yaml in current directory
-  version                            CLI version
+  status                                 Connection + project info
+  version                                CLI version
 
-  memory add|list|search|resolve|defer   Agent memory
-  backlog add|list|show|update|close     Dev backlog
-  message send|inbox|show|read           Agent messaging
-  session start|checkpoint|show|end      Work sessions
-  context status|history|morning|project Project context
-  task get|claim|progress|close          Task management
-  artifact add                           Artifact tracking
-  requirement create|list|show|approve|   Requirement lifecycle
-              verify|reopen|link|unlink|
-              dashboard
-  knowledge create|list|show|update|     Knowledge documents
-            append|history|diff
-  recall "query"                         Semantic search
-  kb search|tree                         Knowledge base search & browse
-  epic create|show|list                  Epic management
-  focus [set|clear]                      Active epic focus
-  shard list|show|create|update|         Shard operations
-        close|reopen|assign|next|board
+  shard list|show|create|update|close|   Shard operations
+        reopen|assign|next|board|status
   shard edges|link|unlink                Edge navigation & management
   shard label add|remove|list            Label management
   shard metadata get|set|delete          Shard metadata ops
   shard query                            Query by metadata
-  admin embed-backfill                   Backfill embeddings
+
+  design create                          Create a design (plan/feature)
+  bug create                             Create a bug (defect)
+  task get|create|claim|progress|close   Task management
+  knowledge create|list|show|update|     Knowledge documents
+            append|history|diff
+  kb search|tree                         Knowledge base search & browse
+
+  memory add|list|search|resolve|defer   Agent memory
+  message send|inbox|show|read           Agent messaging
+  recall "query"                         Semantic search
 
 CONFIGURATION:
   Precedence: env vars > .cp.yaml > ~/.cp/config.yaml > defaults
@@ -68,11 +61,12 @@ CONFIGURATION:
 
 EXAMPLES:
   cp status
-  cp task get pf-123
+  cp design create "Auth redesign" --body "## Overview"
+  cp bug create "Missing names" --severity high
+  cp task create "Fix auth" --parent pf-xxx --assign mycroft
   cp message inbox
-  cp memory add "Lesson learned about timeouts"
   cp recall "pipeline timeout issues"
-  cp --output json task get pf-123`,
+  cp --output json shard list`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -92,6 +86,11 @@ EXAMPLES:
 		}
 		if agentFlag != "" {
 			cfg.Agent = agentFlag
+		}
+
+		// Apply default output format from config if -o not explicitly set
+		if cfg.Defaults != nil && cfg.Defaults.Output != "" && !cmd.Flags().Changed("output") {
+			outputFormat = cfg.Defaults.Output
 		}
 
 		cpClient = client.NewClient(cfg)

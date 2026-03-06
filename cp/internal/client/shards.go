@@ -11,6 +11,35 @@ import (
 	"github.com/otherjamesbrown/context-palace/cp/internal/embedding"
 )
 
+// ValidShardTypes is the canonical list of allowed shard types
+var ValidShardTypes = []string{
+	"design", "bug", "task", "knowledge", "memory", "message", "handoff",
+}
+
+// RetiredTypeHints maps retired types to their replacement
+var RetiredTypeHints = map[string]string{
+	"epic":      "design",
+	"spec":      "design",
+	"feature":   "design",
+	"reference": "knowledge",
+	"report":    "knowledge",
+}
+
+// ValidateShardType checks if a shard type is valid, returning a helpful error for retired types
+func ValidateShardType(shardType string) error {
+	for _, valid := range ValidShardTypes {
+		if shardType == valid {
+			return nil
+		}
+	}
+	if replacement, ok := RetiredTypeHints[shardType]; ok {
+		return fmt.Errorf("type %q is retired. Use %q instead.\n  Retired types: epic→design, spec→design, feature→design, reference→knowledge, report→knowledge\n  Valid types: %s",
+			shardType, replacement, fmt.Sprintf("%v", ValidShardTypes))
+	}
+	return fmt.Errorf("unknown type %q. Valid types: %s",
+		shardType, fmt.Sprintf("%v", ValidShardTypes))
+}
+
 // Shard represents a Context Palace shard
 type Shard struct {
 	ID          string          `json:"id" yaml:"id"`

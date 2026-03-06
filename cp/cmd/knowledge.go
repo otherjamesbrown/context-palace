@@ -52,6 +52,17 @@ var kdCreateCmd = &cobra.Command{
 			return err
 		}
 
+		// Determine parent: explicit flag > config unsorted default
+		parentID, _ := cmd.Flags().GetString("parent")
+		if parentID == "" && cpClient.Config.KnowledgeBase != nil && cpClient.Config.KnowledgeBase.Unsorted != "" {
+			parentID = cpClient.Config.KnowledgeBase.Unsorted
+		}
+		if parentID != "" {
+			if err := cpClient.CreateEdgeSimple(ctx, id, parentID, "child-of"); err != nil {
+				return fmt.Errorf("created knowledge doc %s but failed to set parent: %v", id, err)
+			}
+		}
+
 		if outputFormat == "json" {
 			result := map[string]any{
 				"id":         id,
@@ -451,6 +462,7 @@ func init() {
 	kdCreateCmd.Flags().String("body", "", "Document content (inline)")
 	kdCreateCmd.Flags().String("body-file", "", "Read document content from file")
 	kdCreateCmd.Flags().StringSlice("label", nil, "Labels (repeatable)")
+	kdCreateCmd.Flags().String("parent", "", "Parent shard ID (default: unsorted from config)")
 
 	// list flags
 	kdListCmd.Flags().String("doc-type", "", "Filter by document type")
