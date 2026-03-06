@@ -222,6 +222,39 @@ func (c *Client) ShardExists(ctx context.Context, id string) (bool, error) {
 	return exists, nil
 }
 
+// UpdateEdgeMeta merges the provided fields into an edge's metadata jsonb column.
+// Only non-nil fields are set; existing metadata keys not in updates are preserved.
+func (c *Client) UpdateEdgeMeta(ctx context.Context, fromID, toID, edgeType string, updates map[string]interface{}) error {
+	if !IsValidEdgeType(edgeType) {
+		return fmt.Errorf("unknown edge type: %s. Valid types: %s",
+			edgeType, strings.Join(ValidEdgeTypes, ", "))
+	}
+
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close(ctx)
+
+	metaJSON, err := json.Marshal(updates)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+
+	result, err := conn.Exec(ctx, `
+		UPDATE edges
+		SET metadata = COALESCE(metadata, '{}'::jsonb) || $4::jsonb
+		WHERE from_id = $1 AND to_id = $2 AND edge_type = $3
+	`, fromID, toID, edgeType, string(metaJSON))
+	if err != nil {
+		return fmt.Errorf("failed to update edge metadata: %v", err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("edge not found: %s --%s--> %s", fromID, edgeType, toID)
+	}
+	return nil
+}
+
 // CreateEdgeSimple creates a basic edge without metadata (convenience for memory --references)
 func (c *Client) CreateEdgeSimple(ctx context.Context, fromID, toID, edgeType string) error {
 	return c.CreateEdge(ctx, fromID, toID, edgeType, nil)

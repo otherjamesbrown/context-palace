@@ -258,6 +258,78 @@ var shardUnlinkCmd = &cobra.Command{
 	},
 }
 
+// -- shard edge-meta --
+
+var shardEdgeMetaCmd = &cobra.Command{
+	Use:   "edge-meta <from-shard-id>",
+	Short: "Update metadata on an existing edge",
+	Args:  cobra.ExactArgs(1),
+	Example: `  cxp shard edge-meta pf-abc123 --child-of pf-parent --trigger "When looking up CLI commands" --ordering 7
+  cxp shard edge-meta pf-abc123 --references pf-other --description "Architecture decision context"`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		fromID := args[0]
+
+		// Find which edge type flag was set
+		var edgeType, toID string
+		flagCount := 0
+		for _, et := range client.ValidEdgeTypes {
+			val, _ := cmd.Flags().GetString(et)
+			if val != "" {
+				edgeType = et
+				toID = val
+				flagCount++
+			}
+		}
+
+		if flagCount == 0 {
+			return fmt.Errorf("specify an edge type flag. Valid types: %s", strings.Join(client.ValidEdgeTypes, ", "))
+		}
+		if flagCount > 1 {
+			return fmt.Errorf("exactly one edge type flag allowed")
+		}
+
+		// Build metadata updates from provided flags
+		updates := make(map[string]interface{})
+		if cmd.Flags().Changed("trigger") {
+			v, _ := cmd.Flags().GetString("trigger")
+			updates["trigger"] = v
+		}
+		if cmd.Flags().Changed("description") {
+			v, _ := cmd.Flags().GetString("description")
+			updates["description"] = v
+		}
+		if cmd.Flags().Changed("ordering") {
+			v, _ := cmd.Flags().GetInt("ordering")
+			updates["ordering"] = v
+		}
+
+		if len(updates) == 0 {
+			return fmt.Errorf("provide at least one metadata flag: --trigger, --description, or --ordering")
+		}
+
+		err := cpClient.UpdateEdgeMeta(ctx, fromID, toID, edgeType, updates)
+		if err != nil {
+			return err
+		}
+
+		if outputFormat == "json" {
+			out := map[string]any{
+				"from":      fromID,
+				"to":        toID,
+				"edge_type": edgeType,
+				"updated":   updates,
+			}
+			s, _ := client.FormatJSON(out)
+			fmt.Println(s)
+			return nil
+		}
+
+		fmt.Printf("Updated edge metadata: %s --%s--> %s\n", fromID, edgeType, toID)
+		return nil
+	},
+}
+
 func init() {
 	// shard edges flags
 	shardEdgesCmd.Flags().String("direction", "", "Filter: outgoing, incoming, or both")
@@ -272,7 +344,16 @@ func init() {
 	}
 	shardUnlinkCmd.Flags().Bool("force", false, "Skip confirmation prompt")
 
+	// shard edge-meta flags — one flag per edge type + metadata flags
+	for _, et := range client.ValidEdgeTypes {
+		shardEdgeMetaCmd.Flags().String(et, "", fmt.Sprintf("Target shard for %s edge", et))
+	}
+	shardEdgeMetaCmd.Flags().String("trigger", "", "Set the trigger text (when to load this child)")
+	shardEdgeMetaCmd.Flags().String("description", "", "Set the description text")
+	shardEdgeMetaCmd.Flags().Int("ordering", 0, "Set the ordering (integer, controls display order)")
+
 	shardCmd.AddCommand(shardEdgesCmd)
 	shardCmd.AddCommand(shardLinkCmd)
 	shardCmd.AddCommand(shardUnlinkCmd)
+	shardCmd.AddCommand(shardEdgeMetaCmd)
 }
