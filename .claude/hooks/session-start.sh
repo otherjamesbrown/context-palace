@@ -24,13 +24,13 @@ cxp knowledge show pf-a6209a --agent agent-steve 2>/dev/null || true
 echo ""
 echo "# Work Queue #"
 echo ""
-cxp shard list --type bug,task --status ready --label to:agent-steve --agent agent-steve 2>/dev/null || true
+cxp shard list --type bug,task --assigned-to agent-steve --agent agent-steve 2>/dev/null || true
 
 # In-progress items
 echo ""
 echo "# In Progress #"
 echo ""
-cxp shard list --status in_progress --owner agent-steve --agent agent-steve 2>/dev/null || true
+cxp shard list --status in_progress --assigned-to agent-steve --agent agent-steve 2>/dev/null || true
 
 # Blocked items
 echo ""

@@ -557,6 +557,7 @@ type ListShardsOpts struct {
 	Status    []string
 	Labels    []string
 	Creator   string
+	Owner     string
 	Search    string
 	Since     *time.Time
 	Limit     int
@@ -585,7 +586,7 @@ func (c *Client) ListShardsFiltered(ctx context.Context, opts ListShardsOpts) ([
 	}
 	defer conn.Close(ctx)
 
-	var typesArg, statusArg, labelsArg, creatorArg, searchArg, sinceArg any
+	var typesArg, statusArg, labelsArg, creatorArg, searchArg, sinceArg, ownerArg any
 	if opts.Types != nil {
 		typesArg = opts.Types
 	}
@@ -604,6 +605,9 @@ func (c *Client) ListShardsFiltered(ctx context.Context, opts ListShardsOpts) ([
 	if opts.Since != nil {
 		sinceArg = *opts.Since
 	}
+	if opts.Owner != "" {
+		ownerArg = opts.Owner
+	}
 
 	limit := opts.Limit
 	if limit == 0 {
@@ -612,8 +616,8 @@ func (c *Client) ListShardsFiltered(ctx context.Context, opts ListShardsOpts) ([
 
 	rows, err := conn.Query(ctx, `
 		SELECT id, title, type, status, creator, labels, created_at, updated_at, snippet
-		FROM list_shards($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-	`, c.Config.Project, typesArg, statusArg, labelsArg, creatorArg, searchArg, sinceArg, limit, opts.Offset, opts.RootsOnly)
+		FROM list_shards($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+	`, c.Config.Project, typesArg, statusArg, labelsArg, creatorArg, searchArg, sinceArg, limit, opts.Offset, opts.RootsOnly, ownerArg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list shards: %v", err)
 	}
@@ -642,7 +646,7 @@ func (c *Client) ListShardsCount(ctx context.Context, opts ListShardsOpts) (int,
 	}
 	defer conn.Close(ctx)
 
-	var typesArg, statusArg, labelsArg, creatorArg, searchArg, sinceArg any
+	var typesArg, statusArg, labelsArg, creatorArg, searchArg, sinceArg, ownerArg any
 	if opts.Types != nil {
 		typesArg = opts.Types
 	}
@@ -661,10 +665,13 @@ func (c *Client) ListShardsCount(ctx context.Context, opts ListShardsOpts) (int,
 	if opts.Since != nil {
 		sinceArg = *opts.Since
 	}
+	if opts.Owner != "" {
+		ownerArg = opts.Owner
+	}
 
 	var count int
-	err = conn.QueryRow(ctx, `SELECT list_shards_count($1, $2, $3, $4, $5, $6, $7, $8)`,
-		c.Config.Project, typesArg, statusArg, labelsArg, creatorArg, searchArg, sinceArg, opts.RootsOnly).Scan(&count)
+	err = conn.QueryRow(ctx, `SELECT list_shards_count($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		c.Config.Project, typesArg, statusArg, labelsArg, creatorArg, searchArg, sinceArg, opts.RootsOnly, ownerArg).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("failed to count shards: %v", err)
 	}

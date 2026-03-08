@@ -285,7 +285,8 @@ var shardListCmd = &cobra.Command{
 	Example: `  cp shard list
   cp shard list --type task --status open
   cp shard list --type requirement,bug --label architecture
-  cp shard list --search "timeout" --since 7d`,
+  cp shard list --search "timeout" --since 7d
+  cp shard list --assigned-to agent-penfold`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
@@ -293,6 +294,7 @@ var shardListCmd = &cobra.Command{
 		statusFlag, _ := cmd.Flags().GetString("status")
 		labelFlag, _ := cmd.Flags().GetString("label")
 		creatorFlag, _ := cmd.Flags().GetString("creator")
+		assignedToFlag, _ := cmd.Flags().GetString("assigned-to")
 		searchFlag, _ := cmd.Flags().GetString("search")
 		sinceFlag, _ := cmd.Flags().GetString("since")
 		offset, _ := cmd.Flags().GetInt("offset")
@@ -316,6 +318,13 @@ var shardListCmd = &cobra.Command{
 		}
 		if creatorFlag != "" {
 			opts.Creator = creatorFlag
+		}
+		if assignedToFlag != "" {
+			opts.Owner = assignedToFlag
+			// Default to actionable statuses when filtering by assignee
+			if statusFlag == "" {
+				opts.Status = []string{"open", "ready", "in_progress"}
+			}
 		}
 		if searchFlag != "" {
 			opts.Search = searchFlag
@@ -811,6 +820,7 @@ func init() {
 	shardListCmd.Flags().String("status", "", "Comma-separated statuses")
 	shardListCmd.Flags().String("label", "", "Comma-separated labels (OR)")
 	shardListCmd.Flags().String("creator", "", "Filter by creator")
+	shardListCmd.Flags().String("assigned-to", "", "Filter by owner/assignee")
 	shardListCmd.Flags().String("search", "", "Text search (tsvector)")
 	shardListCmd.Flags().String("since", "", "Time filter: duration or date")
 	shardListCmd.Flags().Int("offset", 0, "Skip N results for pagination")
