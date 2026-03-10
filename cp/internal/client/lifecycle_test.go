@@ -18,6 +18,25 @@ func TestIsValidStatus(t *testing.T) {
 	}
 }
 
+func TestValidTransitionsFrom(t *testing.T) {
+	tests := []struct {
+		from     string
+		expected []string
+	}{
+		{"open", []string{"ready", "in_progress", "closed"}},
+		{"ready", []string{"open", "in_progress", "closed"}},
+		{"in_progress", []string{"open", "needs-review", "closed"}},
+		{"needs-review", []string{"open", "in_progress", "closed"}},
+		{"closed", []string{"open"}},
+		{"invalid", nil},
+	}
+
+	for _, tt := range tests {
+		got := ValidTransitionsFrom(tt.from)
+		assert.Equal(t, tt.expected, got, "ValidTransitionsFrom(%q)", tt.from)
+	}
+}
+
 func TestIsValidTransition(t *testing.T) {
 	tests := []struct {
 		from, to string

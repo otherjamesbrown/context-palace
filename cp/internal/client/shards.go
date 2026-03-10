@@ -23,6 +23,7 @@ var RetiredTypeHints = map[string]string{
 	"feature":   "design",
 	"reference": "knowledge",
 	"report":    "knowledge",
+	"journal":   "knowledge",
 }
 
 // ValidateShardType checks if a shard type is valid, returning a helpful error for retired types
@@ -33,7 +34,7 @@ func ValidateShardType(shardType string) error {
 		}
 	}
 	if replacement, ok := RetiredTypeHints[shardType]; ok {
-		return fmt.Errorf("type %q is retired. Use %q instead.\n  Retired types: epic→design, spec→design, feature→design, reference→knowledge, report→knowledge\n  Valid types: %s",
+		return fmt.Errorf("type %q is retired. Use %q instead.\n  Retired types: epic→design, spec→design, feature→design, reference→knowledge, journal→knowledge, report→knowledge\n  Valid types: %s",
 			shardType, replacement, fmt.Sprintf("%v", ValidShardTypes))
 	}
 	return fmt.Errorf("unknown type %q. Valid types: %s",

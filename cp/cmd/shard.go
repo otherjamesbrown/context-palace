@@ -257,6 +257,14 @@ var shardCreateCmd = &cobra.Command{
 			_, _ = cpClient.UpdateShardFields(ctx, id, nil, nil, &description)
 		}
 
+		// Auto-link to parent if provided
+		parentID, _ := cmd.Flags().GetString("parent")
+		if parentID != "" {
+			if err := cpClient.CreateEdgeSimple(ctx, id, parentID, "child-of"); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: created shard %s but failed to link to parent %s: %v\n", id, parentID, err)
+			}
+		}
+
 		if outputFormat == "json" {
 			result := map[string]any{
 				"id":         id,
@@ -517,9 +525,37 @@ var shardUpdateCmd = &cobra.Command{
 		bodyFile, _ := cmd.Flags().GetString("body-file")
 		title, _ := cmd.Flags().GetString("title")
 		description, _ := cmd.Flags().GetString("description")
+		statusFlag, _ := cmd.Flags().GetString("status")
+
+		// If --status is provided, delegate to the status transition logic
+		if statusFlag != "" {
+			result, err := cpClient.TransitionShardStatus(ctx, id, statusFlag)
+			if err != nil {
+				return err
+			}
+			if outputFormat == "json" {
+				out := map[string]any{
+					"id":         result.ID,
+					"old_status": result.OldStatus,
+					"new_status": result.NewStatus,
+				}
+				s, _ := client.FormatJSON(out)
+				fmt.Println(s)
+				return nil
+			}
+			if result.OldStatus == result.NewStatus {
+				fmt.Printf("%s: already %s\n", result.ID, result.NewStatus)
+			} else {
+				fmt.Printf("%s: %s → %s\n", result.ID, result.OldStatus, result.NewStatus)
+			}
+			// If only --status was given, we're done
+			if body == "" && bodyFile == "" && title == "" && description == "" {
+				return nil
+			}
+		}
 
 		if body == "" && bodyFile == "" && title == "" && description == "" {
-			return fmt.Errorf("at least one of --body, --body-file, --title, or --description is required")
+			return fmt.Errorf("at least one of --body, --body-file, --title, --description, or --status is required")
 		}
 		if body != "" && bodyFile != "" {
 			return fmt.Errorf("cannot use both --body and --body-file")
@@ -586,15 +622,19 @@ var shardUpdateCmd = &cobra.Command{
 // -- shard close --
 
 var shardCloseCmd = &cobra.Command{
-	Use:     "close <shard-id>",
+	Use:     "close <shard-id> [reason]",
 	Short:   "Close a shard with optional reason",
-	Args:    cobra.ExactArgs(1),
-	Example: "  cp shard close pf-abc123\n  cp shard close pf-abc123 --reason \"Done: implemented and tested\"",
+	Args:    cobra.RangeArgs(1, 2),
+	Example: "  cp shard close pf-abc123\n  cp shard close pf-abc123 --reason \"Done: implemented and tested\"\n  cp shard close pf-abc123 \"Done: implemented and tested\"",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		id := args[0]
 
 		reason, _ := cmd.Flags().GetString("reason")
+		// Accept positional reason as well
+		if reason == "" && len(args) == 2 {
+			reason = args[1]
+		}
 
 		result, err := cpClient.CloseShard(ctx, id, reason)
 		if err != nil {
@@ -814,6 +854,7 @@ func init() {
 	shardCreateCmd.Flags().String("label", "", "Comma-separated labels")
 	shardCreateCmd.Flags().String("meta", "", "Metadata as JSON")
 	shardCreateCmd.Flags().String("description", "", "Short description/tagline")
+	shardCreateCmd.Flags().String("parent", "", "Parent shard ID (auto-creates child-of edge)")
 
 	// shard list flags
 	shardListCmd.Flags().String("type", "", "Comma-separated shard types")
@@ -830,6 +871,7 @@ func init() {
 	shardUpdateCmd.Flags().String("body-file", "", "New content (from file)")
 	shardUpdateCmd.Flags().String("title", "", "New title")
 	shardUpdateCmd.Flags().String("description", "", "Short description/tagline")
+	shardUpdateCmd.Flags().String("status", "", "Transition to new status (delegates to shard status)")
 
 	// shard close flags
 	shardCloseCmd.Flags().String("reason", "", "Closure reason")

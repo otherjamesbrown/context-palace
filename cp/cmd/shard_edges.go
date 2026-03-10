@@ -144,33 +144,46 @@ func printTreeNodes(nodes []*client.EdgeTreeNode, prefix string) {
 // -- shard link --
 
 var shardLinkCmd = &cobra.Command{
-	Use:   "link <from-shard-id>",
+	Use:   "link <from-shard-id> [<edge-type> <to-shard-id>]",
 	Short: "Create a typed edge between shards",
-	Args:  cobra.ExactArgs(1),
-	Example: `  cp shard link pf-task-123 --implements pf-req-01
-  cp shard link pf-bug-03 --references pf-task-456
+	Args:  cobra.RangeArgs(1, 3),
+	Example: `  cp shard link pf-task-123 implements pf-req-01
+  cp shard link pf-task-123 --implements pf-req-01
+  cp shard link pf-bug-03 references pf-task-456
   cp shard link pf-req-05 --blocked-by pf-req-03`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		fromID := args[0]
 
-		// Find which edge type flag was set
 		var edgeType, toID string
-		flagCount := 0
-		for _, et := range client.ValidEdgeTypes {
-			val, _ := cmd.Flags().GetString(et)
-			if val != "" {
-				edgeType = et
-				toID = val
-				flagCount++
-			}
-		}
 
-		if flagCount == 0 {
-			return fmt.Errorf("specify an edge type flag. Valid types: %s", strings.Join(client.ValidEdgeTypes, ", "))
-		}
-		if flagCount > 1 {
-			return fmt.Errorf("exactly one edge type flag allowed")
+		// Check positional form: link <from> <edge-type> <to>
+		if len(args) == 3 {
+			edgeType = args[1]
+			toID = args[2]
+			if !client.IsValidEdgeType(edgeType) {
+				return fmt.Errorf("unknown edge type %q. Valid types: %s", edgeType, strings.Join(client.ValidEdgeTypes, ", "))
+			}
+		} else if len(args) == 2 {
+			return fmt.Errorf("positional form requires 3 args: link <from> <edge-type> <to>\n  Example: cxp shard link %s child-of pf-xxx", fromID)
+		} else {
+			// Flag form: link <from> --<edge-type> <to>
+			flagCount := 0
+			for _, et := range client.ValidEdgeTypes {
+				val, _ := cmd.Flags().GetString(et)
+				if val != "" {
+					edgeType = et
+					toID = val
+					flagCount++
+				}
+			}
+
+			if flagCount == 0 {
+				return fmt.Errorf("specify an edge type flag or use positional form.\n  Flag form: cxp shard link %s --child-of pf-xxx\n  Positional: cxp shard link %s child-of pf-xxx\n  Valid types: %s", fromID, fromID, strings.Join(client.ValidEdgeTypes, ", "))
+			}
+			if flagCount > 1 {
+				return fmt.Errorf("exactly one edge type flag allowed")
+			}
 		}
 
 		err := cpClient.CreateEdge(ctx, fromID, toID, edgeType, nil)

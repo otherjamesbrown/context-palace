@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -34,6 +35,21 @@ func IsValidTransition(from, to string) bool {
 		return false
 	}
 	return targets[to]
+}
+
+// ValidTransitionsFrom returns the list of statuses reachable from the given status.
+func ValidTransitionsFrom(from string) []string {
+	targets, ok := shardStatusTransitions[from]
+	if !ok {
+		return nil
+	}
+	var result []string
+	for _, s := range ValidStatuses {
+		if targets[s] {
+			result = append(result, s)
+		}
+	}
+	return result
 }
 
 // TransitionResult holds the result of a status transition.
@@ -73,7 +89,9 @@ func (c *Client) TransitionShardStatus(ctx context.Context, shardID, newStatus s
 	}
 
 	if !IsValidTransition(currentStatus, newStatus) {
-		return nil, fmt.Errorf("invalid transition: %s → %s", currentStatus, newStatus)
+		valid := ValidTransitionsFrom(currentStatus)
+		return nil, fmt.Errorf("cannot transition from %q to %q. Valid transitions from %q: %s",
+			currentStatus, newStatus, currentStatus, strings.Join(valid, ", "))
 	}
 
 	_, err = conn.Exec(ctx,

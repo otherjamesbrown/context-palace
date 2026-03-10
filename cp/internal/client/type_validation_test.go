@@ -23,6 +23,7 @@ func TestValidateShardType_RetiredTypes(t *testing.T) {
 		{"feature", "design"},
 		{"reference", "knowledge"},
 		{"report", "knowledge"},
+		{"journal", "knowledge"},
 	}
 	for _, tt := range tests {
 		err := ValidateShardType(tt.retired)
