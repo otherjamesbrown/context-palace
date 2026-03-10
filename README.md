@@ -117,9 +117,13 @@ cxp knowledge children add pf-parent pf-child \
   --trigger "When configuring model routing or LLM selection" \
   --description "Model config tables, routing rules, provider fallbacks"
 
-# Create a new knowledge article and link it in one step
+# Create a new knowledge article linked into the tree
+# --parent links it, then set routing metadata separately
 cxp knowledge create --title "Deployment Runbook" --body "## Steps..." \
   --parent pf-infrastructure
+cxp knowledge children add pf-infrastructure pf-newid \
+  --trigger "When deploying services" \
+  --description "Step-by-step deployment runbook"
 ```
 
 ### Knowledge Shard Versioning
@@ -170,8 +174,11 @@ When the last child task of a design or bug closes, the parent auto-transitions 
 ```bash
 # Create work items
 cxp design create "Auth redesign" --body "## Overview..."
-cxp task create "Implement token refresh" --parent pf-xxx
+cxp task create "Implement token refresh" --body "Details..."
 cxp bug create "API 500 on empty input" --body "Steps to reproduce..."
+
+# Link a task as a child of a design
+cxp shard link pf-task --child-of pf-design
 
 # Track work
 cxp shard assign pf-abc             # Claim a shard
@@ -188,9 +195,9 @@ cxp shard list --type task --status open
 Agents communicate through messages. Messages are routed using labels.
 
 ```bash
-cxp message inbox                   # Check unread messages
-cxp message send --to agent-steve --subject "Bug report" --body "Details..."
-cxp message read pf-abc             # Read and mark as read
+cxp message inbox                                        # Check unread messages
+cxp message send agent-steve "Bug report" --body "..."   # Send a message
+cxp message read pf-abc                                  # Read and mark as read
 ```
 
 ## Core Primitives
