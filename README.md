@@ -42,14 +42,26 @@ Agents follow a strict retrieval order. Each tier is progressively more expensiv
 
 Your playbook, session hook output, and any shards loaded earlier in the session. **Check here first** — you probably already know it.
 
-The playbook is designed to be the agent's "table of contents." It lists branches with **triggers** — short descriptions of when to load that branch. If a trigger matches what you're looking for, you already know where to go.
+The playbook is designed to be the agent's "table of contents." It lists its children — each with a **trigger** (when to load it) and a **description** (what it covers). If a trigger matches what you're looking for, you already know where to go without any tool call.
+
+Example playbook children (loaded at session start):
+
+```
+Branch: Infrastructure
+  trigger: "Need server details, ports, deployment, mTLS, or observability"
+  description: "Servers, services, deployment scripts, process management"
+
+Branch: Ingest Pipeline
+  trigger: "Working on content ingestion, pipeline stages, or classification"
+  description: "6 pipelines, stage definitions, context engine, routing"
+```
 
 #### 2. Warm — Navigate the KB Tree (cheap)
 
-Follow the playbook's branch triggers to load the right branch. Each branch lists its own children with their own triggers. Follow the tree until you reach the leaf article you need.
+Follow the playbook's triggers to load the right branch. Each branch lists **its own children** with their own triggers. Follow the tree recursively until you reach the leaf article you need.
 
 ```bash
-# Load a branch or article by ID
+# Load a branch — see its content AND its children with triggers
 cxp shard show pf-abc123
 
 # Browse the full tree structure
@@ -57,6 +69,17 @@ cxp kb tree
 ```
 
 This is **structured navigation, not search**. You're following a curated path, not guessing at keywords. It's cheap because each step loads exactly one shard.
+
+The tree is self-navigating because every parent-child link carries routing metadata. **When you add a child to the tree, always set a trigger and description** — without them, the child is invisible to tree navigation:
+
+```bash
+# Link a child with routing metadata
+cxp knowledge children add pf-parent pf-child \
+  --trigger "When working on deployment procedures" \
+  --description "Step-by-step deployment runbook for production"
+```
+
+Access telemetry is tracked automatically — every `shard show` increments an access counter and logs the read. This data is used to identify which articles are most used and which are going stale.
 
 #### 3. Cold — Search (moderate)
 
@@ -76,7 +99,30 @@ Only use `grep`, `glob`, or sub-agent exploration when the KB genuinely doesn't 
 
 **If you find yourself scanning the codebase for something that should be in the KB, note the gap.** That's a signal a knowledge article needs to be created or updated.
 
-### Knowledge Shard Lifecycle
+### Building the KB Tree
+
+Knowledge shards are organized into a tree using `child-of` edges. Each edge carries metadata that makes the tree self-navigating:
+
+| Field | Purpose | Required? |
+|-------|---------|-----------|
+| `trigger` | When should an agent load this child? A routing hint. | Yes — without it, agents can't navigate to this shard |
+| `description` | What does this child cover? A brief summary. | Yes — shown in parent listings |
+| `ordering` | Display order among siblings (lower = first) | Optional, auto-assigned |
+
+A shard without a parent is an **orphan** — it exists but can't be found by tree navigation, only by search. Orphans are a knowledge gap.
+
+```bash
+# Add a child to a branch with full routing metadata
+cxp knowledge children add pf-parent pf-child \
+  --trigger "When configuring model routing or LLM selection" \
+  --description "Model config tables, routing rules, provider fallbacks"
+
+# Create a new knowledge article and link it in one step
+cxp knowledge create --title "Deployment Runbook" --body "## Steps..." \
+  --parent pf-infrastructure
+```
+
+### Knowledge Shard Versioning
 
 Knowledge shards are **versioned**. Updating a knowledge shard creates a new version — the previous content is preserved.
 
@@ -94,8 +140,6 @@ cxp knowledge append pf-abc --body "## New section"
 cxp knowledge history pf-abc
 cxp knowledge diff pf-abc          # Diff between versions
 ```
-
-Knowledge shards are organized into the tree using `child-of` edges. A shard without a parent is an orphan — it exists but can't be found by tree navigation, only by search.
 
 ### Agent Memory
 
