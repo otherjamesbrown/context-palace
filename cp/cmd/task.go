@@ -20,7 +20,7 @@ var taskGetCmd = &cobra.Command{
 	Use:     "get <shard-id>",
 	Short:   "Get task details",
 	Args:    cobra.ExactArgs(1),
-	Example: "  cp task get pf-123",
+	Example: "  cxp task get pf-123",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		task, err := cpClient.GetTask(ctx, args[0])
@@ -63,7 +63,7 @@ var taskClaimCmd = &cobra.Command{
 	Use:     "claim <shard-id>",
 	Short:   "Claim a task",
 	Args:    cobra.ExactArgs(1),
-	Example: "  cp task claim pf-123",
+	Example: "  cxp task claim pf-123",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		success, err := cpClient.ClaimTask(ctx, args[0])
@@ -90,7 +90,7 @@ var taskProgressCmd = &cobra.Command{
 	Use:     "progress <shard-id> <note>",
 	Short:   "Log progress on a task",
 	Args:    cobra.ExactArgs(2),
-	Example: `  cp task progress pf-123 "Found bug in oauth.go line 45"`,
+	Example: `  cxp task progress pf-123 "Found bug in oauth.go line 45"`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		err := cpClient.AddProgress(ctx, args[0], args[1])
@@ -112,7 +112,7 @@ var taskCloseCmd = &cobra.Command{
 	Use:     "close <shard-id> <summary>",
 	Short:   "Close a task",
 	Args:    cobra.ExactArgs(2),
-	Example: `  cp task close pf-123 "Fixed OAuth token refresh"`,
+	Example: `  cxp task close pf-123 "Fixed OAuth token refresh"`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		err := cpClient.CloseTask(ctx, args[0], args[1])

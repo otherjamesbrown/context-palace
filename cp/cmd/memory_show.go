@@ -15,9 +15,9 @@ var memoryShowCmd = &cobra.Command{
 	Use:   "show <id>",
 	Short: "Show a memory with sub-memory pointers",
 	Args:  cobra.ExactArgs(1),
-	Example: `  cp memory show pf-aa1
-  cp memory show pf-aa1 --depth 1
-  cp memory show pf-aa1 --depth 2 -o json`,
+	Example: `  cxp memory show pf-aa1
+  cxp memory show pf-aa1 --depth 1
+  cxp memory show pf-aa1 --depth 2 -o json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		id := args[0]
@@ -33,7 +33,7 @@ var memoryShowCmd = &cobra.Command{
 			return err
 		}
 		if shard.Type != "memory" {
-			return fmt.Errorf("shard %s is type '%s', expected 'memory'. Use `cp shard show` for other types", id, shard.Type)
+			return fmt.Errorf("shard %s is type '%s', expected 'memory'. Use `cxp shard show` for other types", id, shard.Type)
 		}
 
 		// Touch telemetry (record access)

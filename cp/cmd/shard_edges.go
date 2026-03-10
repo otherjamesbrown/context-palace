@@ -15,11 +15,11 @@ var shardEdgesCmd = &cobra.Command{
 	Use:   "edges <shard-id>",
 	Short: "Show edges for a shard",
 	Args:  cobra.ExactArgs(1),
-	Example: `  cp shard edges pf-abc123
-  cp shard edges pf-abc123 --direction outgoing
-  cp shard edges pf-abc123 --edge-type implements,references
-  cp shard edges pf-req-01 --follow
-  cp shard edges pf-req-01 --follow --max-depth 3`,
+	Example: `  cxp shard edges pf-abc123
+  cxp shard edges pf-abc123 --direction outgoing
+  cxp shard edges pf-abc123 --edge-type implements,references
+  cxp shard edges pf-req-01 --follow
+  cxp shard edges pf-req-01 --follow --max-depth 3`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		id := args[0]
@@ -147,10 +147,10 @@ var shardLinkCmd = &cobra.Command{
 	Use:   "link <from-shard-id> [<edge-type> <to-shard-id>]",
 	Short: "Create a typed edge between shards",
 	Args:  cobra.RangeArgs(1, 3),
-	Example: `  cp shard link pf-task-123 implements pf-req-01
-  cp shard link pf-task-123 --implements pf-req-01
-  cp shard link pf-bug-03 references pf-task-456
-  cp shard link pf-req-05 --blocked-by pf-req-03`,
+	Example: `  cxp shard link pf-task-123 implements pf-req-01
+  cxp shard link pf-task-123 --implements pf-req-01
+  cxp shard link pf-bug-03 references pf-task-456
+  cxp shard link pf-req-05 --blocked-by pf-req-03`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		fromID := args[0]
@@ -213,8 +213,8 @@ var shardUnlinkCmd = &cobra.Command{
 	Use:   "unlink <from-shard-id>",
 	Short: "Remove a typed edge between shards",
 	Args:  cobra.ExactArgs(1),
-	Example: `  cp shard unlink pf-task-123 --implements pf-req-01
-  cp shard unlink pf-task-123 --implements pf-req-01 --force`,
+	Example: `  cxp shard unlink pf-task-123 --implements pf-req-01
+  cxp shard unlink pf-task-123 --implements pf-req-01 --force`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		fromID := args[0]

@@ -22,11 +22,11 @@ var messageSendCmd = &cobra.Command{
 	Use:   "send [recipient] [subject] [body]",
 	Short: "Send a message",
 	Args:  cobra.RangeArgs(0, 3),
-	Example: `  cp message send agent-mycroft "Subject" "Short body"
-  cp message send --recipient agent-mycroft --subject "Subject" --body "Body"
-  cp message send agent-mycroft "Bug found" --body "Details here" --kind bug-report
-  cp message send agent-mycroft "Re: Bug" --body "Looking into it" --reply-to pf-abc123
-  echo "Long body" | cp message send agent-mycroft "Subject"`,
+	Example: `  cxp message send agent-mycroft "Subject" "Short body"
+  cxp message send --recipient agent-mycroft --subject "Subject" --body "Body"
+  cxp message send agent-mycroft "Bug found" --body "Details here" --kind bug-report
+  cxp message send agent-mycroft "Re: Bug" --body "Looking into it" --reply-to pf-abc123
+  echo "Long body" | cxp message send agent-mycroft "Subject"`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
@@ -169,7 +169,7 @@ func resolveMessageBody(positional, flag string, stdin io.Reader) (string, error
 var messageCountCmd = &cobra.Command{
 	Use:     "count",
 	Short:   "Count unread messages",
-	Example: "  cp message count\n  cp message count -o json",
+	Example: "  cxp message count\n  cxp message count -o json",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		count, err := cpClient.InboxCount(ctx)
@@ -190,7 +190,7 @@ var messageCountCmd = &cobra.Command{
 var messageInboxCmd = &cobra.Command{
 	Use:     "inbox",
 	Short:   "Show unread messages",
-	Example: "  cp message inbox",
+	Example: "  cxp message inbox",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		messages, err := cpClient.GetInbox(ctx)
@@ -226,7 +226,7 @@ var messageShowCmd = &cobra.Command{
 	Use:     "show <shard-id>",
 	Short:   "Show a message",
 	Args:    cobra.ExactArgs(1),
-	Example: "  cp message show pf-abc123",
+	Example: "  cxp message show pf-abc123",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		msg, err := cpClient.GetMessage(ctx, args[0])
@@ -255,7 +255,7 @@ var messageReadCmd = &cobra.Command{
 	Use:     "read <shard-id> [shard-id...]",
 	Short:   "Read messages and mark as read",
 	Args:    cobra.MinimumNArgs(1),
-	Example: "  cp message read pf-abc123 pf-def456",
+	Example: "  cxp message read pf-abc123 pf-def456",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 

@@ -22,7 +22,7 @@ var (
 var Version = "0.1.0"
 
 var rootCmd = &cobra.Command{
-	Use:   "cp",
+	Use:   "cxp",
 	Short: "Context Palace CLI",
 	Long: `Context Palace — project-agnostic developer tooling for knowledge management,
 semantic search, agent memory, and work tracking.
@@ -60,13 +60,13 @@ CONFIGURATION:
     CP_AGENT      Agent identity
 
 EXAMPLES:
-  cp status
-  cp design create "Auth redesign" --body "## Overview"
-  cp bug create "Missing names" --severity high
-  cp task create "Fix auth" --parent pf-xxx --assign mycroft
-  cp message inbox
-  cp recall "pipeline timeout issues"
-  cp --output json shard list`,
+  cxp status
+  cxp design create "Auth redesign" --body "## Overview"
+  cxp bug create "Missing names" --severity high
+  cxp task create "Fix auth" --parent pf-xxx --assign mycroft
+  cxp message inbox
+  cxp recall "pipeline timeout issues"
+  cxp --output json shard list`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -127,7 +127,7 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("cp version %s\n", Version)
+		fmt.Printf("cxp version %s\n", Version)
 	},
 }
 

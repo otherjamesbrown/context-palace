@@ -17,7 +17,7 @@ var contextCmd = &cobra.Command{
 var contextStatusCmd = &cobra.Command{
 	Use:     "status",
 	Short:   "Project context overview",
-	Example: "  cp context status",
+	Example: "  cxp context status",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		conn, err := cpClient.Connect(ctx)
@@ -81,7 +81,7 @@ var contextStatusCmd = &cobra.Command{
 var contextHistoryCmd = &cobra.Command{
 	Use:     "history",
 	Short:   "Recent project activity",
-	Example: "  cp context history",
+	Example: "  cxp context history",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		conn, err := cpClient.Connect(ctx)
@@ -147,7 +147,7 @@ var contextMorningCmd = &cobra.Command{
 	Use:   "morning",
 	Short: "Morning briefing",
 	Long:  `Shows unread messages, open tasks, and recent activity for a quick start to the day.`,
-	Example: "  cp context morning",
+	Example: "  cxp context morning",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
@@ -210,7 +210,7 @@ var contextMorningCmd = &cobra.Command{
 var contextProjectCmd = &cobra.Command{
 	Use:     "project",
 	Short:   "Project overview",
-	Example: "  cp context project",
+	Example: "  cxp context project",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		conn, err := cpClient.Connect(ctx)

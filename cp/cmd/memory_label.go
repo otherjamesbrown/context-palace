@@ -19,7 +19,7 @@ var memoryLabelAddCmd = &cobra.Command{
 	Use:     "add <memory-id> <label> [label...]",
 	Short:   "Add labels to a memory",
 	Args:    cobra.MinimumNArgs(2),
-	Example: "  cp memory label add pf-abc123 standing-instruction pipeline",
+	Example: "  cxp memory label add pf-abc123 standing-instruction pipeline",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		id := args[0]
@@ -49,7 +49,7 @@ var memoryLabelRemoveCmd = &cobra.Command{
 	Use:     "remove <memory-id> <label> [label...]",
 	Short:   "Remove labels from a memory",
 	Args:    cobra.MinimumNArgs(2),
-	Example: "  cp memory label remove pf-abc123 pipeline",
+	Example: "  cxp memory label remove pf-abc123 pipeline",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		id := args[0]

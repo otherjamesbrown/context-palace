@@ -18,7 +18,7 @@ var childrenListCmd = &cobra.Command{
 	Use:     "list <parent-id>",
 	Short:   "List children of a knowledge document",
 	Args:    cobra.ExactArgs(1),
-	Example: "  cp knowledge children list pf-playbook-001",
+	Example: "  cxp knowledge children list pf-playbook-001",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		parentID := args[0]
@@ -53,7 +53,7 @@ var childrenAddCmd = &cobra.Command{
 	Use:   "add <parent-id> <child-id>",
 	Short: "Add a child document relationship",
 	Args:  cobra.ExactArgs(2),
-	Example: `  cp knowledge children add pf-playbook-001 pf-deploy-guide \
+	Example: `  cxp knowledge children add pf-playbook-001 pf-deploy-guide \
     --description "Deployment procedures" --trigger "When deploying to production"`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
@@ -95,7 +95,7 @@ var childrenUpdateCmd = &cobra.Command{
 	Use:   "update <parent-id> <child-id>",
 	Short: "Update a child document relationship",
 	Args:  cobra.ExactArgs(2),
-	Example: `  cp knowledge children update pf-playbook-001 pf-deploy-guide \
+	Example: `  cxp knowledge children update pf-playbook-001 pf-deploy-guide \
     --description "Updated deployment procedures"`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
@@ -139,7 +139,7 @@ var childrenRemoveCmd = &cobra.Command{
 	Use:     "remove <parent-id> <child-id>",
 	Short:   "Remove a child document relationship",
 	Args:    cobra.ExactArgs(2),
-	Example: "  cp knowledge children remove pf-playbook-001 pf-deploy-guide",
+	Example: "  cxp knowledge children remove pf-playbook-001 pf-deploy-guide",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		parentID := args[0]

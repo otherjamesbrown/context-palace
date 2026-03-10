@@ -16,7 +16,7 @@ var shardAssignCmd = &cobra.Command{
 	Use:     "assign <shard-id>",
 	Short:   "Claim a shard (set owner + in_progress)",
 	Args:    cobra.ExactArgs(1),
-	Example: "  cp shard assign pf-abc123\n  cp shard assign pf-abc123 --agent agent-mycroft",
+	Example: "  cxp shard assign pf-abc123\n  cxp shard assign pf-abc123 --agent agent-mycroft",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		id := args[0]
@@ -61,8 +61,8 @@ var shardAssignCmd = &cobra.Command{
 var shardNextCmd = &cobra.Command{
 	Use:   "next",
 	Short: "Find next unblocked shard",
-	Example: `  cp shard next
-  cp shard next --global            # all open work`,
+	Example: `  cxp shard next
+  cxp shard next --global            # all open work`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
@@ -113,8 +113,8 @@ var shardNextCmd = &cobra.Command{
 var shardBoardCmd = &cobra.Command{
 	Use:   "board",
 	Short: "Kanban view of shards by status",
-	Example: `  cp shard board                     # all open work
-  cp shard board --agent agent-mycroft`,
+	Example: `  cxp shard board                     # all open work
+  cxp shard board --agent agent-mycroft`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 

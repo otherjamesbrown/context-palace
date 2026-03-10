@@ -23,7 +23,7 @@ var shardLabelAddCmd = &cobra.Command{
 	Use:     "add <shard-id> <label> [label...]",
 	Short:   "Add labels to a shard",
 	Args:    cobra.MinimumNArgs(2),
-	Example: "  cp shard label add pf-abc123 architecture pipeline",
+	Example: "  cxp shard label add pf-abc123 architecture pipeline",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		id := args[0]
@@ -55,7 +55,7 @@ var shardLabelRemoveCmd = &cobra.Command{
 	Use:     "remove <shard-id> <label> [label...]",
 	Short:   "Remove labels from a shard",
 	Args:    cobra.MinimumNArgs(2),
-	Example: "  cp shard label remove pf-abc123 pipeline",
+	Example: "  cxp shard label remove pf-abc123 pipeline",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		id := args[0]
@@ -90,7 +90,7 @@ var shardLabelRemoveCmd = &cobra.Command{
 var shardLabelListCmd = &cobra.Command{
 	Use:     "list",
 	Short:   "List all labels in use with counts",
-	Example: "  cp shard label list",
+	Example: "  cxp shard label list",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 

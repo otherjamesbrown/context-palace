@@ -21,13 +21,13 @@ Uses vector embeddings to find semantically similar shards.
 By default, only open shards are searched.
 Use --include-closed to also search closed shards.`,
 	Args:    cobra.ExactArgs(1),
-	Example: `  cp recall "pipeline timeout issues"
-  cp recall "entity resolution" --type requirement,bug
-  cp recall "deployment" --label architecture
-  cp recall "timeout" --include-closed
-  cp recall "vague query" --min-similarity 0.5
-  cp recall "deployment" --limit 5 --since 7d
-  cp recall "entity" --show-snippet`,
+	Example: `  cxp recall "pipeline timeout issues"
+  cxp recall "entity resolution" --type requirement,bug
+  cxp recall "deployment" --label architecture
+  cxp recall "timeout" --include-closed
+  cxp recall "vague query" --min-similarity 0.5
+  cxp recall "deployment" --limit 5 --since 7d
+  cxp recall "entity" --show-snippet`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		query := args[0]
 
@@ -94,7 +94,7 @@ Use --include-closed to also search closed shards.`,
 		}
 
 		if cpClient.EmbedProvider == nil {
-			return fmt.Errorf("semantic search requires embedding config. Use `cp shard list --search` for text search")
+			return fmt.Errorf("semantic search requires embedding config. Use `cxp shard list --search` for text search")
 		}
 
 		ctx := context.Background()

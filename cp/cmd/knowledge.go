@@ -26,8 +26,8 @@ var kdCreateCmd = &cobra.Command{
 	Use:   "create <title>",
 	Short: "Create a new knowledge document",
 	Args:  cobra.ExactArgs(1),
-	Example: `  cp knowledge create "System Architecture" --doc-type architecture --body "## Components"
-  cp knowledge create "Decisions Log" --doc-type decision --body-file decisions.md --label core`,
+	Example: `  cxp knowledge create "System Architecture" --doc-type architecture --body "## Components"
+  cxp knowledge create "Decisions Log" --doc-type decision --body-file decisions.md --label core`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		title := args[0]
@@ -101,7 +101,7 @@ var kdCreateCmd = &cobra.Command{
 var kdListCmd = &cobra.Command{
 	Use:     "list",
 	Short:   "List knowledge documents",
-	Example: "  cp knowledge list\n  cp knowledge list --doc-type architecture",
+	Example: "  cxp knowledge list\n  cxp knowledge list --doc-type architecture",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
@@ -142,7 +142,7 @@ var kdShowCmd = &cobra.Command{
 	Use:     "show <id>",
 	Short:   "Show a knowledge document",
 	Args:    cobra.ExactArgs(1),
-	Example: "  cp knowledge show pf-arch-001\n  cp knowledge show pf-arch-001 --version 2",
+	Example: "  cxp knowledge show pf-arch-001\n  cxp knowledge show pf-arch-001 --version 2",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		id := args[0]
@@ -266,8 +266,8 @@ var kdUpdateCmd = &cobra.Command{
 	Use:   "update <id>",
 	Short: "Update document content (versioned)",
 	Args:  cobra.ExactArgs(1),
-	Example: `  cp knowledge update pf-arch-001 --body-file updated-arch.md --summary "Added pipeline stage diagram"
-  cp knowledge update pf-arch-001 --body "New content" --summary "Rewrote section"`,
+	Example: `  cxp knowledge update pf-arch-001 --body-file updated-arch.md --summary "Added pipeline stage diagram"
+  cxp knowledge update pf-arch-001 --body "New content" --summary "Rewrote section"`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		id := args[0]
@@ -306,8 +306,8 @@ var kdAppendCmd = &cobra.Command{
 	Use:   "append <id>",
 	Short: "Append content to document (versioned)",
 	Args:  cobra.ExactArgs(1),
-	Example: `  cp knowledge append pf-dec-001 --summary "Decision: Split CLI" --body "## Decision: Split CLI"
-  cp knowledge append pf-dec-001 --summary "Added entry" --body-file entry.md`,
+	Example: `  cxp knowledge append pf-dec-001 --summary "Decision: Split CLI" --body "## Decision: Split CLI"
+  cxp knowledge append pf-dec-001 --summary "Added entry" --body-file entry.md`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		id := args[0]
@@ -346,7 +346,7 @@ var kdHistoryCmd = &cobra.Command{
 	Use:     "history <id>",
 	Short:   "Show version history",
 	Args:    cobra.ExactArgs(1),
-	Example: "  cp knowledge history pf-arch-001",
+	Example: "  cxp knowledge history pf-arch-001",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		id := args[0]
@@ -385,8 +385,8 @@ var kdDiffCmd = &cobra.Command{
 	Use:   "diff <id>",
 	Short: "Diff between versions",
 	Args:  cobra.ExactArgs(1),
-	Example: `  cp knowledge diff pf-arch-001
-  cp knowledge diff pf-arch-001 --from 1 --to 3`,
+	Example: `  cxp knowledge diff pf-arch-001
+  cxp knowledge diff pf-arch-001 --from 1 --to 3`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		id := args[0]

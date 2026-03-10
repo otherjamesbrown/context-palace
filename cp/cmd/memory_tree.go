@@ -14,10 +14,10 @@ var memoryTreeCmd = &cobra.Command{
 	Use:   "tree [root-id]",
 	Short: "Show memory hierarchy",
 	Args:  cobra.MaximumNArgs(1),
-	Example: `  cp memory tree
-  cp memory tree pf-aa1
-  cp memory tree --stats
-  cp memory tree --max-depth 2`,
+	Example: `  cxp memory tree
+  cxp memory tree pf-aa1
+  cxp memory tree --stats
+  cxp memory tree --max-depth 2`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
@@ -185,9 +185,9 @@ func buildJSONNode(node client.MemoryTreeNode, childMap map[string][]client.Memo
 var memoryHotCmd = &cobra.Command{
 	Use:   "hot",
 	Short: "Show promotion candidates",
-	Example: `  cp memory hot
-  cp memory hot --min-depth 2
-  cp memory hot --limit 10`,
+	Example: `  cxp memory hot
+  cxp memory hot --min-depth 2
+  cxp memory hot --limit 10`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
@@ -245,9 +245,9 @@ var memorySyncCmd = &cobra.Command{
 	Use:   "sync [parent-id]",
 	Short: "Reconcile pointer blocks",
 	Args:  cobra.MaximumNArgs(1),
-	Example: `  cp memory sync --dry-run
-  cp memory sync
-  cp memory sync pf-aa1`,
+	Example: `  cxp memory sync --dry-run
+  cxp memory sync
+  cxp memory sync pf-aa1`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
@@ -291,7 +291,7 @@ var memorySyncCmd = &cobra.Command{
 					}
 				}
 			}
-			fmt.Printf("\nRun `cp memory sync` to fix.\n")
+			fmt.Printf("\nRun `cxp memory sync` to fix.\n")
 		} else {
 			fmt.Printf("Sync: %d parents checked, %d fixed\n\n", result.ParentsChecked, len(result.Discrepancies))
 			for _, d := range result.Discrepancies {

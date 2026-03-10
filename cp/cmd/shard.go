@@ -30,7 +30,7 @@ var shardMetadataGetCmd = &cobra.Command{
 	Use:     "get <shard-id> [field]",
 	Short:   "Get shard metadata",
 	Args:    cobra.RangeArgs(1, 2),
-	Example: "  cp shard metadata get pf-123\n  cp shard metadata get pf-123 lifecycle_status\n  cp shard metadata get pf-123 test_coverage.unit",
+	Example: "  cxp shard metadata get pf-123\n  cxp shard metadata get pf-123 lifecycle_status\n  cxp shard metadata get pf-123 test_coverage.unit",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		id := args[0]
@@ -85,7 +85,7 @@ var shardMetadataSetCmd = &cobra.Command{
 	Use:     "set <shard-id> <key> <value>",
 	Short:   "Set a metadata field",
 	Args:    cobra.ExactArgs(3),
-	Example: "  cp shard metadata set pf-123 lifecycle_status approved\n  cp shard metadata set pf-123 test_coverage.unit 5\n  cp shard metadata set pf-123 test_coverage '{\"unit\": 5, \"integration\": 2}'",
+	Example: "  cxp shard metadata set pf-123 lifecycle_status approved\n  cxp shard metadata set pf-123 test_coverage.unit 5\n  cxp shard metadata set pf-123 test_coverage '{\"unit\": 5, \"integration\": 2}'",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		id := args[0]
@@ -119,7 +119,7 @@ var shardMetadataDeleteCmd = &cobra.Command{
 	Use:     "delete <shard-id> <key>",
 	Short:   "Delete a metadata key",
 	Args:    cobra.ExactArgs(2),
-	Example: "  cp shard metadata delete pf-123 deprecated_field",
+	Example: "  cxp shard metadata delete pf-123 deprecated_field",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		id := args[0]
@@ -145,7 +145,7 @@ var shardMetadataDeleteCmd = &cobra.Command{
 var shardQueryCmd = &cobra.Command{
 	Use:     "query",
 	Short:   "Query shards by type and metadata",
-	Example: "  cp shard query --type requirement --meta \"lifecycle_status=approved\"\n  cp shard query --meta \"priority=1\"",
+	Example: "  cxp shard query --type requirement --meta \"lifecycle_status=approved\"\n  cxp shard query --meta \"priority=1\"",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
@@ -191,9 +191,9 @@ var shardQueryCmd = &cobra.Command{
 var shardCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new shard",
-	Example: `  cp shard create --type design --title "Entity filter architecture" --body "## Design"
-  cp shard create --type task --title "Fix bug" --body-file design.md --label urgent,backend
-  cp shard create --type bug --title "Missing names" --meta '{"severity":"high"}'`,
+	Example: `  cxp shard create --type design --title "Entity filter architecture" --body "## Design"
+  cxp shard create --type task --title "Fix bug" --body-file design.md --label urgent,backend
+  cxp shard create --type bug --title "Missing names" --meta '{"severity":"high"}'`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
@@ -290,11 +290,11 @@ var shardCreateCmd = &cobra.Command{
 var shardListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List shards with filters",
-	Example: `  cp shard list
-  cp shard list --type task --status open
-  cp shard list --type requirement,bug --label architecture
-  cp shard list --search "timeout" --since 7d
-  cp shard list --assigned-to agent-penfold`,
+	Example: `  cxp shard list
+  cxp shard list --type task --status open
+  cxp shard list --type requirement,bug --label architecture
+  cxp shard list --search "timeout" --since 7d
+  cxp shard list --assigned-to agent-penfold`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
@@ -391,7 +391,7 @@ var shardShowCmd = &cobra.Command{
 	Use:     "show <shard-id>",
 	Short:   "Show shard detail (for knowledge shards: includes children with triggers and access stats)",
 	Args:    cobra.ExactArgs(1),
-	Example: "  cp shard show pf-c74eea",
+	Example: "  cxp shard show pf-c74eea",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		id := args[0]
@@ -514,9 +514,9 @@ var shardUpdateCmd = &cobra.Command{
 	Use:   "update <shard-id>",
 	Short: "Update shard content or title",
 	Args:  cobra.ExactArgs(1),
-	Example: `  cp shard update pf-abc123 --body "Updated content"
-  cp shard update pf-abc123 --body-file updated.md
-  cp shard update pf-abc123 --title "New Title"`,
+	Example: `  cxp shard update pf-abc123 --body "Updated content"
+  cxp shard update pf-abc123 --body-file updated.md
+  cxp shard update pf-abc123 --title "New Title"`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		id := args[0]
@@ -590,7 +590,7 @@ var shardUpdateCmd = &cobra.Command{
 
 		// Warn if knowledge doc
 		if result.ShardType == "knowledge" {
-			fmt.Fprintf(os.Stderr, "Warning: This is a knowledge document. Use `cp knowledge update` to preserve version history.\n")
+			fmt.Fprintf(os.Stderr, "Warning: This is a knowledge document. Use `cxp knowledge update` to preserve version history.\n")
 		}
 
 		if outputFormat == "json" {
@@ -625,7 +625,7 @@ var shardCloseCmd = &cobra.Command{
 	Use:     "close <shard-id> [reason]",
 	Short:   "Close a shard with optional reason",
 	Args:    cobra.RangeArgs(1, 2),
-	Example: "  cp shard close pf-abc123\n  cp shard close pf-abc123 --reason \"Done: implemented and tested\"\n  cp shard close pf-abc123 \"Done: implemented and tested\"",
+	Example: "  cxp shard close pf-abc123\n  cxp shard close pf-abc123 --reason \"Done: implemented and tested\"\n  cxp shard close pf-abc123 \"Done: implemented and tested\"",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		id := args[0]
@@ -679,7 +679,7 @@ var shardReopenCmd = &cobra.Command{
 	Use:     "reopen <shard-id>",
 	Short:   "Reopen a closed shard",
 	Args:    cobra.ExactArgs(1),
-	Example: "  cp shard reopen pf-abc123",
+	Example: "  cxp shard reopen pf-abc123",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		id := args[0]

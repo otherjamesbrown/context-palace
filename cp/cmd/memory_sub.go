@@ -17,10 +17,10 @@ var memoryAddSubCmd = &cobra.Command{
 	Use:   "add-sub <parent-id>",
 	Short: "Create a sub-memory under a parent",
 	Args:  cobra.ExactArgs(1),
-	Example: `  cp memory add-sub pf-aa1 --title "Troubleshooting" --body "If the service fails..."
-  cp memory add-sub pf-aa1 --title "Troubleshooting" --body-file troubleshoot.md
-  cp memory add-sub pf-aa1 --title "X" --body "Y" --no-ai --summary "When X happens"
-  cp memory add-sub pf-aa1 --title "X" --body-file x.md --auto-approve`,
+	Example: `  cxp memory add-sub pf-aa1 --title "Troubleshooting" --body "If the service fails..."
+  cxp memory add-sub pf-aa1 --title "Troubleshooting" --body-file troubleshoot.md
+  cxp memory add-sub pf-aa1 --title "X" --body "Y" --no-ai --summary "When X happens"
+  cxp memory add-sub pf-aa1 --title "X" --body-file x.md --auto-approve`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		parentID := args[0]
@@ -167,7 +167,7 @@ var memoryDeleteCmd = &cobra.Command{
 	Use:     "delete <id>",
 	Short:   "Delete a memory",
 	Args:    cobra.ExactArgs(1),
-	Example: "  cp memory delete pf-aa2 --force\n  cp memory delete pf-aa2 --recursive --force",
+	Example: "  cxp memory delete pf-aa2 --force\n  cxp memory delete pf-aa2 --recursive --force",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		id := args[0]
@@ -233,8 +233,8 @@ var memoryMoveCmd = &cobra.Command{
 	Use:   "move <id> [new-parent-id]",
 	Short: "Re-parent a memory",
 	Args:  cobra.RangeArgs(1, 2),
-	Example: `  cp memory move pf-aa2 pf-xx1
-  cp memory move pf-aa2 --root`,
+	Example: `  cxp memory move pf-aa2 pf-xx1
+  cxp memory move pf-aa2 --root`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		id := args[0]
@@ -281,7 +281,7 @@ var memoryPromoteCmd = &cobra.Command{
 	Use:     "promote <id>",
 	Short:   "Move a memory up one level",
 	Args:    cobra.ExactArgs(1),
-	Example: "  cp memory promote pf-aa2",
+	Example: "  cxp memory promote pf-aa2",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		id := args[0]

@@ -20,9 +20,9 @@ var memoryAddCmd = &cobra.Command{
 	Use:   "add <content>",
 	Short: "Add a memory",
 	Args:  cobra.ExactArgs(1),
-	Example: `  cp memory add "AI client timeout was hardcoded at 120s, not configurable"
-  cp memory add "Entity names missing" --label entity,pipeline
-  cp memory add "Discovered during investigation" --references pf-bug-03,pf-req-01`,
+	Example: `  cxp memory add "AI client timeout was hardcoded at 120s, not configurable"
+  cxp memory add "Entity names missing" --label entity,pipeline
+  cxp memory add "Discovered during investigation" --references pf-bug-03,pf-req-01`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		content := args[0]
@@ -78,9 +78,9 @@ var memoryAddCmd = &cobra.Command{
 var memoryListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List memories",
-	Example: `  cp memory list
-  cp memory list --label lesson-learned
-  cp memory list --since 7d`,
+	Example: `  cxp memory list
+  cxp memory list --label lesson-learned
+  cxp memory list --since 7d`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
@@ -140,8 +140,8 @@ var memorySearchCmd = &cobra.Command{
 	Use:     "search <query>",
 	Short:   "Text search memories",
 	Args:    cobra.ExactArgs(1),
-	Example: `  cp memory search "timeout"
-  cp memory search "timeout" --label pipeline`,
+	Example: `  cxp memory search "timeout"
+  cxp memory search "timeout" --label pipeline`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
@@ -180,13 +180,13 @@ var memoryRecallCmd = &cobra.Command{
 	Use:   "recall <query>",
 	Short: "Semantic search over memories",
 	Args:  cobra.ExactArgs(1),
-	Example: `  cp memory recall "deployment issues"
-  cp memory recall "timeout" --label pipeline --limit 5`,
+	Example: `  cxp memory recall "deployment issues"
+  cxp memory recall "timeout" --label pipeline --limit 5`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		query := args[0]
 
 		if cpClient.EmbedProvider == nil {
-			return fmt.Errorf("semantic recall requires embedding config. Use `cp memory search` for text search")
+			return fmt.Errorf("semantic recall requires embedding config. Use `cxp memory search` for text search")
 		}
 
 		ctx := context.Background()
@@ -238,7 +238,7 @@ var memoryResolveCmd = &cobra.Command{
 	Use:     "resolve <shard-id>",
 	Short:   "Resolve (close) a memory",
 	Args:    cobra.ExactArgs(1),
-	Example: "  cp memory resolve pf-mem-123",
+	Example: "  cxp memory resolve pf-mem-123",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		err := cpClient.UpdateShardStatus(ctx, args[0], "closed")
@@ -260,7 +260,7 @@ var memoryDeferCmd = &cobra.Command{
 	Use:     "defer <shard-id>",
 	Short:   "Defer a memory for later review",
 	Args:    cobra.ExactArgs(1),
-	Example: "  cp memory defer pf-mem-123",
+	Example: "  cxp memory defer pf-mem-123",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		err := cpClient.UpdateShardStatus(ctx, args[0], "deferred")

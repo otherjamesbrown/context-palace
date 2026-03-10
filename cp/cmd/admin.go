@@ -20,9 +20,9 @@ var adminEmbedBackfillCmd = &cobra.Command{
 	Short: "Generate embeddings for shards that don't have them",
 	Long: `Fetches shards without embeddings and generates them using the configured
 embedding provider. Rate-limited to ~50 requests/minute.`,
-	Example: `  cp admin embed-backfill
-  cp admin embed-backfill --dry-run
-  cp admin embed-backfill --batch-size 20 --type task`,
+	Example: `  cxp admin embed-backfill
+  cxp admin embed-backfill --dry-run
+  cxp admin embed-backfill --batch-size 20 --type task`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if cpClient.EmbedProvider == nil {
 			return fmt.Errorf("embedding provider not configured.\nAdd an `embedding:` section to ~/.cp/config.yaml")
