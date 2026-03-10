@@ -1,139 +1,198 @@
 # Context Palace
 
-A shared memory and coordination system for AI agents. Work tracking, knowledge management, messaging, semantic search, and agent memory — all backed by PostgreSQL.
+A shared memory and knowledge system for AI agents. Institutional knowledge, work tracking, messaging, and semantic search — all backed by PostgreSQL.
 
 ## What is it?
 
-Context Palace gives AI agents (and humans) a persistent, shared workspace. Instead of separate systems for tasks, messages, docs, and memory, everything lives in one database as **shards** — a universal primitive that can represent any type of work item or content.
+Context Palace gives AI agents a persistent, shared brain. Everything lives in the database as **shards** — a universal primitive that can represent knowledge articles, work items, messages, or memories. Shards connect to each other via typed **edges**, forming trees, dependency graphs, and conversation threads.
 
-Agents use the `cxp` CLI to create shards, send messages, track work, store knowledge, and search across everything semantically.
+There are two distinct systems built on this primitive:
+
+1. **Knowledge Base** — durable institutional memory. Versioned, tree-structured, designed to be navigated and searched across sessions. This is what agents *think* with.
+2. **Work Tracking** — ephemeral workflow. Designs, tasks, bugs that get created, worked, and closed. This is how agents *coordinate*.
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                      Context Palace                          │
-│                                                              │
-│  task ──────blocked-by──────► bug                            │
-│    │                           │                             │
-│    ├── child-of ──► design     ├── discovered-from ──► test  │
-│    │                           │                             │
-│  knowledge ──references──► message ──replies-to──► message   │
-│                                                              │
-│  Everything is a shard. Shards connect via edges.            │
-└──────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                      Context Palace                         │
+│                                                             │
+│  KNOWLEDGE BASE              WORK TRACKING                  │
+│  ─────────────               ─────────────                  │
+│  playbook (root)             design                         │
+│    ├── branch                  ├── task (child)             │
+│    │   ├── article               ├── task (child)           │
+│    │   └── article             bug                          │
+│    └── branch                    └── task (child)           │
+│                                                             │
+│  Navigated via tree.         Tracked via board & status.    │
+│  Searched via kb search.     Lifecycle: open → closed.      │
+│                                                             │
+│  + memories, messages, handoffs, sessions                   │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## Core Concepts
+## Knowledge Base — How Agents Think
+
+The knowledge base is a **tree of versioned knowledge shards** that agents navigate to find information. The root of the tree is the **playbook** — a knowledge shard that's always loaded into the agent's context at session start.
+
+### The Retrieval Hierarchy
+
+Agents follow a strict retrieval order. Each tier is progressively more expensive. Don't skip tiers.
+
+#### 1. Hot — Already in Context (free)
+
+Your playbook, session hook output, and any shards loaded earlier in the session. **Check here first** — you probably already know it.
+
+The playbook is designed to be the agent's "table of contents." It lists branches with **triggers** — short descriptions of when to load that branch. If a trigger matches what you're looking for, you already know where to go.
+
+#### 2. Warm — Navigate the KB Tree (cheap)
+
+Follow the playbook's branch triggers to load the right branch. Each branch lists its own children with their own triggers. Follow the tree until you reach the leaf article you need.
+
+```bash
+# Load a branch or article by ID
+cxp shard show pf-abc123
+
+# Browse the full tree structure
+cxp kb tree
+```
+
+This is **structured navigation, not search**. You're following a curated path, not guessing at keywords. It's cheap because each step loads exactly one shard.
+
+#### 3. Cold — Search (moderate)
+
+When the tree doesn't cover your question, search:
+
+```bash
+# Hybrid BM25 + vector search scoped to the knowledge tree
+cxp kb search "pipeline routing configuration"
+
+# Broader semantic search across ALL shard types
+cxp recall "how does model selection work"
+```
+
+#### 4. Last Resort — Codebase Scan (expensive)
+
+Only use `grep`, `glob`, or sub-agent exploration when the KB genuinely doesn't have the answer. This is for implementation details not captured in knowledge articles — specific function signatures, recent uncommitted changes, etc.
+
+**If you find yourself scanning the codebase for something that should be in the KB, note the gap.** That's a signal a knowledge article needs to be created or updated.
+
+### Knowledge Shard Lifecycle
+
+Knowledge shards are **versioned**. Updating a knowledge shard creates a new version — the previous content is preserved.
+
+```bash
+# Create a new knowledge article
+cxp knowledge create --title "Deployment Runbook" --body "## Steps..."
+
+# Update (creates a new version, preserves history)
+cxp knowledge update pf-abc --body "## Updated steps..."
+
+# Append content without replacing
+cxp knowledge append pf-abc --body "## New section"
+
+# View version history
+cxp knowledge history pf-abc
+cxp knowledge diff pf-abc          # Diff between versions
+```
+
+Knowledge shards are organized into the tree using `child-of` edges. A shard without a parent is an orphan — it exists but can't be found by tree navigation, only by search.
+
+### Agent Memory
+
+**Memories** are a separate mechanism from knowledge shards. They persist agent-specific context across sessions — preferences, learned patterns, things to remember that don't belong in the shared KB.
+
+```bash
+cxp memory add --title "Use UTC" --body "Always use UTC for timestamps"
+cxp memory list                     # List active memories
+cxp memory search "timestamp"       # Search memories
+```
+
+Memories can have triggers (conditions that make them relevant) and expiry dates. They're personal to an agent, while knowledge shards are shared across agents.
+
+## Work Tracking — How Agents Coordinate
+
+Work tracking uses three shard types with a simple lifecycle:
+
+| Type | Purpose |
+|------|---------|
+| `design` | Plans and proposals. Defines *what* to build. Spawns child tasks. |
+| `task` | Actionable work items. Assigned to an agent, tracked to completion. |
+| `bug` | Defects. Like tasks but discovered during operation, not planned. |
+
+**Status lifecycle:** `open → in_progress → needs-review → closed`
+
+When the last child task of a design or bug closes, the parent auto-transitions to `needs-review`.
+
+```bash
+# Create work items
+cxp design create "Auth redesign" --body "## Overview..."
+cxp task create "Implement token refresh" --parent pf-xxx
+cxp bug create "API 500 on empty input" --body "Steps to reproduce..."
+
+# Track work
+cxp shard assign pf-abc             # Claim a shard
+cxp shard status pf-abc in_progress # Update status
+cxp shard close pf-abc              # Close when done
+
+# View the board
+cxp board                           # Grouped view of all open work
+cxp shard list --type task --status open
+```
+
+## Messaging
+
+Agents communicate through messages. Messages are routed using labels.
+
+```bash
+cxp message inbox                   # Check unread messages
+cxp message send --to agent-steve --subject "Bug report" --body "Details..."
+cxp message read pf-abc             # Read and mark as read
+```
+
+## Core Primitives
 
 ### Shards
 
-A **shard** is the universal primitive. Every item in Context Palace is a shard with a type, status, content, and metadata. Shard IDs are prefixed by project (e.g., `pf-a1b2c3` for the penfold project).
+A **shard** is the universal primitive. Every item has a type, status, content, and metadata. Shard IDs are prefixed by project (e.g., `pf-a1b2c3` for the penfold project).
 
-| Type | Purpose | Example |
-|------|---------|---------|
-| `task` | Work items, actionable to-dos | "Fix auth timeout bug" |
-| `bug` | Defects, issues to investigate | "API returns 500 on empty input" |
-| `design` | Plans, architecture decisions | "Auth redesign proposal" |
-| `knowledge` | Versioned reference documents (playbooks, guides, specs) | "Deployment runbook" |
-| `message` | Agent-to-agent or human-to-agent communication | "Re: Pipeline config question" |
-| `memory` | Persistent agent context that survives across sessions | "Always use UTC for timestamps" |
-| `handoff` | Session continuity — captures state for the next session | "Session 42 handoff" |
-| `report` | Generated summaries, digests, analysis | "Weekly bug triage report" |
-| `session` | Tracks an agent's working session (start/checkpoint/end) | "Steve session 2026-03-08" |
-
-**Key shard types explained:**
-
-- **task vs bug**: Tasks are planned work; bugs are defects discovered during operation. Both track through `open → in_progress → needs-review → closed`.
-- **knowledge vs message**: Knowledge documents are versioned, long-lived reference material. Messages are transient communication between agents.
-- **memory**: Persists context across agent sessions — things an agent should remember but that don't belong in code or docs. Memories can have triggers and expiry dates.
-- **handoff**: When an agent session ends, it writes a handoff shard capturing current state, in-progress work, and next steps so a future session can resume.
-- **design**: Proposals and plans that may spawn child tasks.
+| Type | Purpose |
+|------|---------|
+| `knowledge` | Versioned reference documents — playbooks, guides, runbooks |
+| `design` | Plans and architecture decisions |
+| `task` | Actionable work items |
+| `bug` | Defects and issues |
+| `message` | Agent-to-agent communication |
+| `memory` | Persistent agent context across sessions |
+| `handoff` | Session state capture for continuity |
+| `session` | Tracks an agent's working session |
 
 ### Edges
 
-**Edges** are typed relationships between shards:
+Typed relationships between shards:
 
-| Edge Type | Meaning | Example |
-|-----------|---------|---------|
-| `child-of` | Hierarchical parent-child | Task is child-of a design |
-| `blocked-by` | Dependency — can't proceed until resolved | Task blocked-by another task |
-| `replies-to` | Message threading | Reply replies-to original message |
-| `discovered-from` | Origin tracking | Bug discovered-from a test run |
-| `references` | Loose association | Knowledge doc references a design |
-| `implements` | Realization | Task implements a design |
-| `previous-version` | Version history for knowledge docs | v2 previous-version v1 |
-| `triggered-by` | Causal link | Memory triggered-by an event |
+| Edge Type | Meaning |
+|-----------|---------|
+| `child-of` | Tree structure — knowledge branches, task hierarchy |
+| `blocked-by` | Dependency — can't proceed until resolved |
+| `replies-to` | Message threading |
+| `discovered-from` | Origin tracking (bug from test) |
+| `references` | Loose association |
+| `implements` | Task implements a design |
+| `previous-version` | Version history chain |
 
 ### Labels
 
-**Labels** are tags for filtering and routing:
+Tags for filtering and routing:
 
-- **Routing**: `to:agent-steve`, `cc:agent-penfold` — message recipients
-- **Categories**: `backend`, `cli`, `email`, `infrastructure`
-- **Workflow**: `blocked`, `focus`, `needs-review`, `urgent`
+- **Routing**: `to:agent-steve`, `cc:agent-penfold`
+- **Categories**: `backend`, `cli`, `infrastructure`
+- **Workflow**: `blocked`, `focus`, `urgent`
 
 ### Projects
 
-A **project** is a namespace. Each project has a unique ID prefix:
+A **project** is a namespace with a unique ID prefix. Shards are scoped to a project; the prefix is auto-applied to shard IDs.
 
-| Project | Prefix | Description |
-|---------|--------|-------------|
-| penfold | `pf-` | Penfold platform |
-| mycroft | `my-` | Mycroft project |
-| context-palace | `cp-` | Context Palace itself |
-
-Shards are scoped to a project. The prefix is auto-applied to shard IDs.
-
-## CLI (`cxp`)
-
-The `cxp` binary is the primary interface. It reads config from `.cp.yaml` (project-local) or `~/.cp/config.yaml` (global).
-
-### Key Commands
-
-```bash
-# Connection & status
-cxp status                              # Check connection, project, shard counts
-
-# Work tracking
-cxp shard list --type task --status open # List open tasks
-cxp shard show pf-a1b2c3                # View a shard
-cxp shard create --type task --title "Fix bug" --body "Details..."
-cxp shard assign pf-a1b2c3              # Claim a shard
-cxp shard status pf-a1b2c3 in_progress  # Update status
-cxp shard close pf-a1b2c3               # Close a shard
-cxp bug create "API 500 error" --body "Steps to reproduce..."
-cxp task create "Implement feature" --body "Spec details..."
-
-# Knowledge base
-cxp knowledge create --title "Runbook" --body "## Steps..."
-cxp knowledge update pf-abc --body "Updated content"  # Creates new version
-cxp knowledge append pf-abc --body "## New section"    # Appends to content
-cxp kb search "deployment process"       # Semantic search over knowledge
-cxp kb tree                              # Browse knowledge hierarchy
-
-# Messaging
-cxp message inbox                        # Check unread messages
-cxp message send --to agent-steve --subject "Bug report" --body "Details..."
-cxp message read pf-a1b2c3              # Read and mark as read
-
-# Agent memory
-cxp memory add --title "Use UTC" --body "Always use UTC for timestamps"
-cxp memory list                          # List active memories
-cxp memory search "timestamp"            # Search memories
-cxp recall "pipeline timeout issues"     # Semantic search across all shards
-
-# Edges & relationships
-cxp shard link pf-aaa pf-bbb --type blocked-by
-cxp shard edges pf-a1b2c3               # View relationships
-
-# Labels
-cxp shard label add pf-a1b2c3 urgent,backend
-cxp shard label remove pf-a1b2c3 urgent
-
-# Board view
-cxp board                                # Grouped view of open work
-```
-
-### Configuration
+## Configuration
 
 Config precedence: **env vars > `.cp.yaml` > `~/.cp/config.yaml` > defaults**
 
@@ -168,9 +227,7 @@ Environment variables: `CP_HOST`, `CP_DATABASE`, `CP_USER`, `CP_PROJECT`, `CP_AG
 
 See `setup.md` for step-by-step instructions for Claude Code instances, or `claude-template.md` for manual setup.
 
-### Quick setup
-
-1. Create `.cp.yaml` in your project root (see config above)
+1. Create `.cp.yaml` in your project root
 2. Ensure SSL certs are in `~/.postgresql/`
 3. Run `cxp status` to verify connection
 4. Ensure your project is registered in the `projects` table
