@@ -61,65 +61,28 @@ var shardAssignCmd = &cobra.Command{
 var shardNextCmd = &cobra.Command{
 	Use:   "next",
 	Short: "Find next unblocked shard",
-	Example: `  cp shard next                     # within focused epic (if set)
-  cp shard next --epic pf-abc123    # within specific epic
+	Example: `  cp shard next
   cp shard next --global            # all open work`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
-		epicFlag, _ := cmd.Flags().GetString("epic")
-		globalFlag, _ := cmd.Flags().GetBool("global")
 		nextLimit, _ := cmd.Flags().GetInt("limit")
 
 		if nextLimit <= 0 {
 			nextLimit = 1
 		}
 
-		// Determine scope
-		var epicID *string
 		scopeLabel := "global"
 
-		if epicFlag != "" {
-			epicID = &epicFlag
-			scopeLabel = fmt.Sprintf("epic %q", epicFlag)
-		} else if !globalFlag {
-			// Check focus
-			focus, _ := cpClient.GetFocus(ctx)
-			if focus != nil {
-				epicID = &focus.EpicID
-				scopeLabel = fmt.Sprintf("epic %q", focus.EpicTitle)
-			}
-		}
-
-		shards, err := cpClient.GetNextShards(ctx, epicID, nextLimit)
+		shards, err := cpClient.GetNextShards(ctx, nil, nextLimit)
 		if err != nil {
 			return err
 		}
 
 		if outputFormat == "json" {
-			scope := "global"
-			if epicID != nil {
-				scope = "epic"
-			}
 			out := map[string]any{
-				"scope": scope,
+				"scope": "global",
 				"next":  shards,
-			}
-			if epicID != nil {
-				out["epic_id"] = *epicID
-			}
-			// If scoped to epic, show upcoming blocked items
-			if epicID != nil {
-				children, _ := cpClient.GetEpicChildren(ctx, *epicID)
-				var upcoming []client.EpicChild
-				for _, ch := range children {
-					if ch.Status == "open" && len(ch.BlockedBy) > 0 {
-						upcoming = append(upcoming, ch)
-					}
-				}
-				if len(upcoming) > 0 {
-					out["upcoming"] = upcoming
-				}
 			}
 			s, _ := client.FormatJSON(out)
 			fmt.Println(s)
@@ -141,25 +104,6 @@ var shardNextCmd = &cobra.Command{
 			fmt.Printf("  %-10s %-8s %-40s (%s, %s)\n", s.ID, s.Kind, client.Truncate(s.Title, 40), pri, blocked)
 		}
 
-		// If scoped to epic, show "after that" section
-		if epicID != nil {
-			children, _ := cpClient.GetEpicChildren(ctx, *epicID)
-			var upcoming []client.EpicChild
-			for _, ch := range children {
-				if ch.Status == "open" && len(ch.BlockedBy) > 0 {
-					upcoming = append(upcoming, ch)
-				}
-			}
-			if len(upcoming) > 0 {
-				fmt.Println("\n  After that:")
-				for _, ch := range upcoming {
-					fmt.Printf("  %-10s %-8s %-40s (blocked by: %s)\n",
-						ch.ID, ch.Kind, client.Truncate(ch.Title, 40),
-						strings.Join(ch.BlockedBy, ", "))
-				}
-			}
-		}
-
 		return nil
 	},
 }
@@ -169,19 +113,13 @@ var shardNextCmd = &cobra.Command{
 var shardBoardCmd = &cobra.Command{
 	Use:   "board",
 	Short: "Kanban view of shards by status",
-	Example: `  cp shard board                     # within focused epic
-  cp shard board --epic pf-abc123    # specific epic
-  cp shard board --global            # all open work
+	Example: `  cp shard board                     # all open work
   cp shard board --agent agent-mycroft`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
-		epicFlag, _ := cmd.Flags().GetString("epic")
-		globalFlag, _ := cmd.Flags().GetBool("global")
 		agentFilter, _ := cmd.Flags().GetString("agent")
 
-		// Determine scope
-		var epicID *string
 		var agentPtr *string
 		scopeLabel := "global"
 
@@ -190,19 +128,7 @@ var shardBoardCmd = &cobra.Command{
 			scopeLabel = agentFilter
 		}
 
-		if epicFlag != "" {
-			epicID = &epicFlag
-			scopeLabel = epicFlag
-		} else if !globalFlag && agentFilter == "" {
-			// Check focus
-			focus, _ := cpClient.GetFocus(ctx)
-			if focus != nil {
-				epicID = &focus.EpicID
-				scopeLabel = fmt.Sprintf("%s (%s)", focus.EpicTitle, focus.EpicID)
-			}
-		}
-
-		shards, err := cpClient.GetShardBoard(ctx, epicID, agentPtr)
+		shards, err := cpClient.GetShardBoard(ctx, nil, agentPtr)
 		if err != nil {
 			return err
 		}
@@ -228,9 +154,6 @@ var shardBoardCmd = &cobra.Command{
 				"needs_review": needsReviewShards,
 				"completed":    completedShards,
 			}
-			if epicID != nil {
-				out["epic_id"] = *epicID
-			}
 			s, _ := client.FormatJSON(out)
 			fmt.Println(s)
 			return nil
@@ -245,16 +168,7 @@ var shardBoardCmd = &cobra.Command{
 			return nil
 		}
 
-		// Show epic header with progress if applicable
-		if epicID != nil {
-			progress, _ := cpClient.GetEpicProgress(ctx, *epicID)
-			if progress != nil {
-				bar := renderProgressBar(progress.Completed, progress.Total, 10)
-				fmt.Printf("%s  %s %d/%d\n\n", scopeLabel, bar, progress.Completed, progress.Total)
-			} else {
-				fmt.Printf("%s\n\n", scopeLabel)
-			}
-		} else if agentFilter != "" {
+		if agentFilter != "" {
 			fmt.Printf("%s is working on:\n\n", agentFilter)
 		}
 
@@ -380,13 +294,11 @@ func init() {
 	shardAssignCmd.Flags().String("instance", "", "Instance ID for this session (default: $CLAUDE_INSTANCE_ID)")
 
 	// shard next flags
-	shardNextCmd.Flags().String("epic", "", "Scope to specific epic")
 	shardNextCmd.Flags().Bool("global", false, "Ignore focus, search all open work")
 	shardNextCmd.Flags().Int("limit", 1, "Number of candidates to return (max 10)")
 
 	// shard board flags
-	shardBoardCmd.Flags().String("epic", "", "Scope to specific epic")
-	shardBoardCmd.Flags().Bool("global", false, "All open work across epics")
+	shardBoardCmd.Flags().Bool("global", false, "All open work")
 	shardBoardCmd.Flags().String("agent", "", "Filter to specific agent's work")
 
 	// Wire into shard command tree

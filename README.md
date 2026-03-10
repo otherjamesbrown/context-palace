@@ -36,7 +36,6 @@ A **shard** is the universal primitive. Every item in Context Palace is a shard 
 | `knowledge` | Versioned reference documents (playbooks, guides, specs) | "Deployment runbook" |
 | `message` | Agent-to-agent or human-to-agent communication | "Re: Pipeline config question" |
 | `memory` | Persistent agent context that survives across sessions | "Always use UTC for timestamps" |
-| `epic` | Large initiatives grouping multiple tasks/designs | "Q1 Platform Migration" |
 | `handoff` | Session continuity — captures state for the next session | "Session 42 handoff" |
 | `report` | Generated summaries, digests, analysis | "Weekly bug triage report" |
 | `session` | Tracks an agent's working session (start/checkpoint/end) | "Steve session 2026-03-08" |
@@ -47,7 +46,7 @@ A **shard** is the universal primitive. Every item in Context Palace is a shard 
 - **knowledge vs message**: Knowledge documents are versioned, long-lived reference material. Messages are transient communication between agents.
 - **memory**: Persists context across agent sessions — things an agent should remember but that don't belong in code or docs. Memories can have triggers and expiry dates.
 - **handoff**: When an agent session ends, it writes a handoff shard capturing current state, in-progress work, and next steps so a future session can resume.
-- **design**: Proposals and plans that may spawn child tasks. Often linked to an epic.
+- **design**: Proposals and plans that may spawn child tasks.
 
 ### Edges
 
@@ -55,7 +54,7 @@ A **shard** is the universal primitive. Every item in Context Palace is a shard 
 
 | Edge Type | Meaning | Example |
 |-----------|---------|---------|
-| `child-of` | Hierarchical parent-child | Task is child-of an epic |
+| `child-of` | Hierarchical parent-child | Task is child-of a design |
 | `blocked-by` | Dependency — can't proceed until resolved | Task blocked-by another task |
 | `replies-to` | Message threading | Reply replies-to original message |
 | `discovered-from` | Origin tracking | Bug discovered-from a test run |

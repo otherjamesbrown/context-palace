@@ -99,7 +99,6 @@ Shard IDs are prefixed by project: `PREFIX-a1b2c3`.
 | `knowledge` | Versioned reference docs | Guides, runbooks, playbooks — long-lived content |
 | `message` | Agent communication | You need to tell another agent something |
 | `memory` | Persistent agent context | Something you need to remember across sessions |
-| `epic` | Large initiatives | Grouping multiple tasks under one umbrella |
 | `handoff` | Session state transfer | Capturing state so your next session can resume |
 | `report` | Summaries, digests | Generated analysis or status reports |
 
@@ -125,7 +124,7 @@ Shards connect to each other via typed edges:
 
 | Edge | Meaning |
 |------|---------|
-| `child-of` | Hierarchical — task is child of an epic |
+| `child-of` | Hierarchical — task is child of a design |
 | `blocked-by` | Can't proceed until the other shard is resolved |
 | `replies-to` | Message threading |
 | `discovered-from` | Where this bug/issue was found |
