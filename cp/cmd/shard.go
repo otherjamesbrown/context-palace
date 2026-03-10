@@ -381,7 +381,7 @@ var shardListCmd = &cobra.Command{
 
 var shardShowCmd = &cobra.Command{
 	Use:     "show <shard-id>",
-	Short:   "Show shard detail",
+	Short:   "Show shard detail (for knowledge shards: includes children with triggers and access stats)",
 	Args:    cobra.ExactArgs(1),
 	Example: "  cp shard show pf-c74eea",
 	RunE: func(cmd *cobra.Command, args []string) error {

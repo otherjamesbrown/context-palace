@@ -16,7 +16,10 @@ var knowledgeCmd = &cobra.Command{
 	Use:     "knowledge",
 	Aliases: []string{"kd"},
 	Short:   "Knowledge document management",
-	Long:    `Commands for creating, updating, and versioning knowledge documents.`,
+	Long: `Knowledge documents form a navigable tree — the agent's institutional memory.
+The tree is structured so agents can navigate (warm retrieval) before searching
+(cold retrieval). Every knowledge shard should be linked into the tree with a
+trigger and description so other agents can find it by following the tree.`,
 }
 
 var kdCreateCmd = &cobra.Command{
@@ -54,12 +57,21 @@ var kdCreateCmd = &cobra.Command{
 
 		// Determine parent: explicit flag > config unsorted default
 		parentID, _ := cmd.Flags().GetString("parent")
+		trigger, _ := cmd.Flags().GetString("trigger")
+		childDesc, _ := cmd.Flags().GetString("description")
 		if parentID == "" && cpClient.Config.KnowledgeBase != nil && cpClient.Config.KnowledgeBase.Unsorted != "" {
 			parentID = cpClient.Config.KnowledgeBase.Unsorted
 		}
 		if parentID != "" {
-			if err := cpClient.CreateEdgeSimple(ctx, id, parentID, "child-of"); err != nil {
-				return fmt.Errorf("created knowledge doc %s but failed to set parent: %v", id, err)
+			if trigger != "" || childDesc != "" {
+				// Use AddKnowledgeChild to set edge metadata (trigger + description)
+				if err := cpClient.AddKnowledgeChild(ctx, parentID, id, childDesc, trigger); err != nil {
+					return fmt.Errorf("created knowledge doc %s but failed to link to parent: %v", id, err)
+				}
+			} else {
+				if err := cpClient.CreateEdgeSimple(ctx, id, parentID, "child-of"); err != nil {
+					return fmt.Errorf("created knowledge doc %s but failed to set parent: %v", id, err)
+				}
 			}
 		}
 
@@ -463,6 +475,8 @@ func init() {
 	kdCreateCmd.Flags().String("body-file", "", "Read document content from file")
 	kdCreateCmd.Flags().StringSlice("label", nil, "Labels (repeatable)")
 	kdCreateCmd.Flags().String("parent", "", "Parent shard ID (default: unsorted from config)")
+	kdCreateCmd.Flags().String("trigger", "", "When to load this doc — routing hint for tree navigation (used with --parent)")
+	kdCreateCmd.Flags().String("description", "", "What this doc covers — shown in parent listings (used with --parent)")
 
 	// list flags
 	kdListCmd.Flags().String("doc-type", "", "Filter by document type")

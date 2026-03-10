@@ -12,7 +12,12 @@ import (
 var kbCmd = &cobra.Command{
 	Use:   "kb",
 	Short: "Knowledge base search and navigation",
-	Long: `Search and browse the knowledge base tree.
+	Long: `Navigate and search the knowledge base tree.
+
+The KB tree is designed for structured navigation first, search second. Your
+playbook (always loaded at session start) lists branches with triggers — follow
+triggers to load branches, then find articles. Only use kb search when the
+tree doesn't cover your question.
 
 The knowledge base root is configured in ~/.cp/config.yaml:
 

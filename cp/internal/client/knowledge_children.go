@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 )
 
 // KnowledgeChild represents a child document linked to a parent knowledge doc
@@ -14,6 +13,7 @@ type KnowledgeChild struct {
 	Description string `json:"description"`
 	Trigger     string `json:"trigger"`
 	Order       int    `json:"order"`
+	AccessCount int    `json:"access_count,omitempty"`
 }
 
 // childEdgeMeta is the metadata stored on child-of edges for knowledge children
@@ -26,34 +26,42 @@ type childEdgeMeta struct {
 // ListKnowledgeChildren returns child docs linked to a parent knowledge doc via child-of edges.
 // DB convention: child-of edges go from_id=child, to_id=parent.
 // So we query INCOMING child-of edges on the parent to find its children.
+// Children are sorted by: explicit ordering first, then access_count DESC, then title.
 func (c *Client) ListKnowledgeChildren(ctx context.Context, parentID string) ([]KnowledgeChild, error) {
-	edges, err := c.GetShardEdges(ctx, parentID, "incoming", []string{"child-of"})
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(ctx)
+
+	rows, err := conn.Query(ctx, `
+		SELECT s.id, s.title,
+			COALESCE(e.metadata->>'description', ''),
+			COALESCE(e.metadata->>'trigger', ''),
+			COALESCE((e.metadata->>'ordering')::INT, 0),
+			COALESCE((s.metadata->>'access_count')::INT, 0)
+		FROM edges e
+		JOIN shards s ON s.id = e.from_id
+		WHERE e.to_id = $1 AND e.edge_type = 'child-of'
+		ORDER BY
+			COALESCE((e.metadata->>'ordering')::INT, 999),
+			COALESCE((s.metadata->>'access_count')::INT, 0) DESC,
+			s.title
+	`, parentID)
 	if err != nil {
 		return nil, fmt.Errorf("list children: %w", err)
 	}
+	defer rows.Close()
 
 	var children []KnowledgeChild
-	for _, e := range edges {
-		child := KnowledgeChild{
-			ID:    e.ShardID,
-			Title: e.Title,
+	for rows.Next() {
+		var ch KnowledgeChild
+		if err := rows.Scan(&ch.ID, &ch.Title, &ch.Description, &ch.Trigger, &ch.Order, &ch.AccessCount); err != nil {
+			return nil, fmt.Errorf("scan child: %w", err)
 		}
-		if e.EdgeMetadata != nil {
-			var meta childEdgeMeta
-			if json.Unmarshal(e.EdgeMetadata, &meta) == nil {
-				child.Description = meta.Description
-				child.Trigger = meta.Trigger
-				child.Order = meta.Ordering
-			}
-		}
-		children = append(children, child)
+		children = append(children, ch)
 	}
-
-	sort.Slice(children, func(i, j int) bool {
-		return children[i].Order < children[j].Order
-	})
-
-	return children, nil
+	return children, rows.Err()
 }
 
 // AddKnowledgeChild links a child knowledge doc to a parent with description and trigger metadata.
