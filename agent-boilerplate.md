@@ -64,6 +64,30 @@ Use labels for routing and categorization:
 - `blocked` — can't proceed, needs input
 - `focus` — pinned to board focus section
 - `needs-review` — done, awaiting verification
+
+### KB Routing Quality
+
+When creating or updating KB shards, write the parent/child `trigger` and
+`description` as retrieval-quality text.
+
+Treat them as the shard's interface:
+- `trigger` answers: "Read this when you need to know about X, Y, or Z."
+- `description` answers: "This shard covers A, B, and C."
+
+Rules:
+- Write triggers from the agent's perspective, as task or question language.
+- Prefer concrete problem statements over taxonomy labels.
+- Include the terms an agent would naturally search for or recognize in a task.
+- Be specific enough to distinguish this shard from siblings.
+- Update triggers and descriptions when a shard's scope changes.
+
+Bad:
+- `trigger`: `database`
+- `description`: `DB stuff`
+
+Good:
+- `trigger`: `Need PostgreSQL connection details, migration workflow, or test DB setup`
+- `description`: `Database URLs, SSL requirements, Alembic usage, local and test setup`
 ```
 
 ---
@@ -203,6 +227,30 @@ At the start of every session:
 3. **Log progress**: `cxp shard append PREFIX-xxx --body "update"`
 4. **Complete**: `cxp shard status PREFIX-xxx needs-review`
 5. **After approval**: `cxp shard close PREFIX-xxx`
+
+### KB Routing Quality
+
+When creating or updating KB shards, write the parent/child `trigger` and
+`description` as retrieval-quality text.
+
+Treat them as the shard's interface:
+- `trigger` answers: "Read this when you need to know about X, Y, or Z."
+- `description` answers: "This shard covers A, B, and C."
+
+Rules:
+- Write triggers from the agent's perspective, as task or question language.
+- Prefer concrete problem statements over taxonomy labels.
+- Include the terms an agent would naturally search for or recognize in a task.
+- Be specific enough to distinguish this shard from siblings.
+- Update triggers and descriptions when a shard's scope changes.
+
+Bad:
+- `trigger`: `database`
+- `description`: `DB stuff`
+
+Good:
+- `trigger`: `Need PostgreSQL connection details, migration workflow, or test DB setup`
+- `description`: `Database URLs, SSL requirements, Alembic usage, local and test setup`
 ```
 
 ---

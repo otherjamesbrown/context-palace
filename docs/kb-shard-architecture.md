@@ -128,6 +128,35 @@ Each branch node is a lightweight index — it lists its children with triggers,
 
 This is the paper's retrieval hook pattern: the hot tier tells agents where to look, branch nodes narrow the search, and leaf nodes provide the actual knowledge.
 
+The quality of those retrieval hooks matters. In practice, the `trigger` and `description` on each parent-child edge are the shard's discoverability interface:
+
+- `trigger` answers: "Read this when you need to know about X, Y, or Z."
+- `description` answers: "This shard covers A, B, and C."
+
+Agents creating or updating KB shards should write these as retrieval-quality text, not placeholders:
+
+- write from the agent's perspective
+- use task language or question language
+- include the terms likely to appear in a work item or debugging session
+- avoid vague labels that could apply to many siblings
+- revise the text when the shard's scope changes
+
+Poor example:
+
+```text
+trigger: "auth"
+description: "Authentication docs"
+```
+
+Better example:
+
+```text
+trigger: "Need token refresh flow, session expiry rules, or provider auth troubleshooting"
+description: "Access token lifecycle, refresh behavior, auth failure modes, provider-specific caveats"
+```
+
+If this text is weak, the shard is effectively invisible except through search.
+
 ### Temperature in Practice
 
 | Temperature | What | How loaded | Token cost |
@@ -215,6 +244,8 @@ A good KB shard for implemented software should include:
 - known operational constraints
 - accepted differences from the original spec
 - triggers that tell future agents when to load it
+
+Those triggers should be written with the same care as the article body. A technically correct shard with vague routing text is still a retrieval failure.
 
 At this point, the spec is no longer the primary working context for day-to-day implementation. It becomes historical design intent. The KB shard becomes active memory because it reflects implemented reality.
 

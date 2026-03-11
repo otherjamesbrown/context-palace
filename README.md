@@ -122,6 +122,32 @@ cxp knowledge children add pf-parent pf-child \
   --description "Step-by-step deployment runbook for production"
 ```
 
+Treat `trigger` and `description` as the shard's retrieval interface, not as bookkeeping metadata.
+
+- `trigger` should answer: "Read this when you need to know about X, Y, or Z."
+- `description` should answer: "This shard covers A, B, and C."
+
+Write them from the agent's perspective:
+
+- use task or question language, not taxonomy labels
+- include the terms an agent would naturally recognize from a work item
+- make sibling shards clearly distinguishable
+- update the text when the shard's scope changes
+
+Bad:
+
+```text
+trigger: "database"
+description: "DB stuff"
+```
+
+Good:
+
+```text
+trigger: "Need PostgreSQL connection details, migration workflow, or test DB setup"
+description: "Database URLs, SSL requirements, Alembic usage, local and test setup"
+```
+
 Access telemetry is tracked automatically — every `shard show` increments an access counter and logs the read. This data is used to identify which articles are most used and which are going stale.
 
 #### 3. Cold — Search (moderate)
@@ -153,6 +179,8 @@ Knowledge shards are organized into a tree using `child-of` edges. Each edge car
 | `ordering` | Display order among siblings (lower = first) | Optional, auto-assigned |
 
 A shard without a parent is an **orphan** — it exists but can't be found by tree navigation, only by search. Orphans are a knowledge gap.
+
+If the trigger and description are weak, the shard is effectively undiscoverable even if it is linked into the tree.
 
 ```bash
 # Add a child to a branch with full routing metadata
