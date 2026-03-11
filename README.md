@@ -21,6 +21,22 @@ In real engineering workflows, these systems often form a lifecycle:
 
 This keeps agents from depending forever on stale build-time specs while still preserving the original design intent.
 
+In practice, agents also need a stable retrieval hierarchy:
+
+`law -> map -> domain knowledge -> verified implementation`
+
+- **Law** — repo constitution files such as `AGENTS.md`, `CLAUDE.md`, or equivalent. These define non-negotiable rules, source-of-truth precedence, and operating constraints.
+- **Map** — the root KB playbook. This is the navigational layer that tells the agent which branch to load and when.
+- **Domain knowledge** — branch and leaf KB shards. These are the focused explanations and operational guides for a subsystem.
+- **Verified implementation** — code and tests. This is the final arbiter when documentation and reality diverge.
+
+The hot tier is therefore usually a combination of:
+
+- the repo-level law (`AGENTS.md` / `CLAUDE.md`)
+- the root KB playbook (the map)
+
+They solve different problems and should not be collapsed into one document.
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                      Context Palace                         │
@@ -50,9 +66,26 @@ Agents follow a strict retrieval order. Each tier is progressively more expensiv
 
 #### 1. Hot — Already in Context (free)
 
-Your playbook, session hook output, and any shards loaded earlier in the session. **Check here first** — you probably already know it.
+Your repo law, playbook, session hook output, and any shards loaded earlier in the session. **Check here first** — you probably already know it.
+
+The hot tier is usually split in two:
+
+- **Law** — repo constitution files such as `AGENTS.md` or `CLAUDE.md`
+- **Map** — the root KB playbook
 
 The playbook is designed to be the agent's "table of contents." It lists its children — each with a **trigger** (when to load it) and a **description** (what it covers). If a trigger matches what you're looking for, you already know where to go without any tool call.
+
+The law layer answers:
+
+- what must not be violated
+- which source wins when two artifacts disagree
+- coding, testing, and workflow constraints
+
+The map layer answers:
+
+- what knowledge domains exist
+- when to load which branch
+- where implemented knowledge lives
 
 Example playbook children (loaded at session start):
 

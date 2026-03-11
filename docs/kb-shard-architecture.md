@@ -12,6 +12,15 @@ For engineering projects, the most effective operating model is usually not "put
 
 This matters because build-time intent and post-implementation reality are not the same thing. Agents need both, but at different times.
 
+The retrieval hierarchy that supports this lifecycle is:
+
+`law -> map -> domain knowledge -> verified implementation`
+
+- **Law** — repo-level constitution files such as `AGENTS.md`, `CLAUDE.md`, or equivalent
+- **Map** — the root KB playbook that routes the agent to the right branch
+- **Domain knowledge** — branch and leaf KB shards containing focused subsystem knowledge
+- **Verified implementation** — code and tests, which win when documents drift
+
 ## The Problem
 
 LLM agents face a fundamental tension: they need access to large amounts of project knowledge, but their context windows are finite and expensive. The naive approaches both fail:
@@ -69,6 +78,39 @@ The **playbook** (loaded on every session start) is Context Palace's implementat
 
 The playbook is kept under ~200 lines. Everything else lives in the tree.
 
+### Hot Tier = Law + Map
+
+In real projects, the hot tier should usually be treated as a combination of two artifacts:
+
+1. **Law** — the repo constitution (`AGENTS.md`, `CLAUDE.md`, or equivalent)
+2. **Map** — the playbook shard at the root of the knowledge tree
+
+These artifacts are both "always available," but they are not interchangeable.
+
+**Law** exists to define:
+
+- non-negotiable constraints
+- source-of-truth precedence
+- coding, testing, and workflow rules
+- things the agent must obey even when other documentation says something different
+
+**Map** exists to define:
+
+- what knowledge branches exist
+- when to load which branch
+- which KB shards supersede old build-time specs for implemented systems
+- how to route from a task to the right domain knowledge
+
+Treating both as hot context avoids two failure modes:
+
+- putting everything into the law file, which turns it into a bloated, stale flat document
+- putting hard constraints only into the playbook, which makes them feel like optional routing hints instead of rules
+
+The clean model is:
+
+- **law** tells the agent what it must obey
+- **map** tells the agent where to go next
+
 ### Tree Navigation with Triggers
 
 The knowledge tree uses **trigger-based navigation** rather than requiring agents to understand a taxonomy upfront:
@@ -90,7 +132,7 @@ This is the paper's retrieval hook pattern: the hot tier tells agents where to l
 
 | Temperature | What | How loaded | Token cost |
 |-------------|------|------------|------------|
-| Hot | Playbook | SessionStart hook, automatic | ~200 lines per session |
+| Hot | Law + playbook | SessionStart hook, automatic | ~200-400 lines per session |
 | Warm | Branch nodes | Agent reads trigger, loads on match | ~50-100 lines per branch |
 | Cold | Leaf articles | Agent navigates tree or searches | ~100-400 lines per article |
 | Search | Any shard | `cxp kb search` (hybrid BM25 + vector) | Variable |
@@ -193,6 +235,13 @@ The lifecycle solves this cleanly:
 - **Work shards** answer: what exactly are we doing now, and how do we know it is done?
 - **KB shard** answers: how does this implemented system actually work?
 
+Within the retrieval hierarchy, that becomes:
+
+- **Law** answers: what rules override everything else?
+- **Map** answers: where should I go for the right context?
+- **Domain knowledge** answers: what does this subsystem mean and how is it operated?
+- **Verified implementation** answers: what is true right now?
+
 ### Why This Works Well for AI Coding Agents
 
 AI coding agents perform best when the active context matches the actual phase of work:
@@ -246,6 +295,17 @@ This is the key distinction:
 
 - **Specs are for building**
 - **KB shards are for operating and extending**
+
+And the higher-level decision order is:
+
+- **Law -> Map -> Domain Knowledge -> Verified Implementation**
+
+If these layers disagree, the resolution order should normally be:
+
+1. Law beats map
+2. Map routes to the relevant domain shard
+3. Domain shard beats historical build-time docs for that subsystem
+4. Verified implementation beats all documentation when reality has drifted
 
 ## Access-Count Promotion — Reducing Navigation Calls
 
