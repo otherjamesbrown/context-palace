@@ -118,6 +118,71 @@ These relationships enable queries that flat files can't support: "what knowledg
 
 Tree navigation handles known-unknowns (the agent knows where to look). But for unknown-unknowns, Context Palace provides hybrid search across all shards — BM25 for keyword matches plus vector similarity for semantic matches. The paper identified this gap: their keyword-matching retrieval service worked but missed semantic connections. Context Palace's hybrid search addresses this.
 
+## Access-Count Promotion — Reducing Navigation Calls
+
+The three-tier model assumes agents navigate from hot → warm → cold, making explicit tool calls at each step. But usage data reveals that certain warm/cold shards are accessed almost every session — these are effectively hot knowledge masquerading as cold.
+
+Context Palace tracks `access_count` on every shard and exposes it in the `knowledge show` response. The playbook's children array includes each branch's access count:
+
+```json
+{
+  "id": "pf-6b8072",
+  "title": "Penfold CLI Reference",
+  "trigger": "When looking up a penf command",
+  "access_count": 47
+}
+```
+
+**Dynamic promotion** uses this data to push frequently-accessed 2nd-layer articles directly into the session start context, eliminating the navigation call entirely. Instead of:
+
+1. Agent reads playbook (hot) — sees trigger for CLI Reference
+2. Agent calls `cxp shard show pf-6b8072` — loads branch
+3. Agent finds the leaf it needs — another call
+
+With promotion, high-access branches are injected at session start:
+
+1. Agent reads playbook (hot) — CLI Reference content already present
+
+This reduces the number of tool calls per session. Each eliminated call saves ~2-5 seconds of round-trip time and preserves the agent's "flow" — interrupting reasoning to make a retrieval call and then re-integrating the result is cognitively expensive for LLMs, just as context-switching is expensive for humans.
+
+**Promotion criteria:** A shard qualifies for promotion when its access count crosses a threshold relative to the total session count. If a shard is accessed in >60% of sessions, it's effectively hot knowledge and should be loaded at session start. The `knowledge show` command already exposes the data needed for this decision — the session start hook can query for high-access children and inject them alongside the playbook.
+
+**Budget constraint:** Promoted shards consume context window budget on every session, even when not needed. The playbook is ~200 lines; each promoted branch adds ~50-100 lines. A practical budget is 3-5 promoted branches before the hot tier becomes bloated. Access counts provide the signal for which branches earn that budget.
+
+This is a feedback loop: access counts measure what agents actually need → promotion reduces friction for high-demand knowledge → agents work faster → the system learns from real usage rather than upfront taxonomy design.
+
+## Relationship to llms.txt
+
+The `/llms.txt` proposal (Howard, 2024) addresses a parallel problem: how do you make a body of knowledge accessible to LLMs without forcing them to process everything?
+
+The proposal introduces a standardised file at a website's root that provides:
+- A concise summary of what the site contains
+- An index of available documents with URLs
+- Machine-readable structure (Markdown with H2-delimited sections)
+- Optional tiering: `llms.txt` (index) vs `llms-full.txt` (expanded content)
+
+This maps directly to Context Palace's architecture:
+
+| llms.txt Concept | Context Palace Equivalent |
+|-----------------|--------------------------|
+| `/llms.txt` — concise index | Playbook — branch index with triggers |
+| `/llms-full.txt` — expanded content | Full KB tree — all shards loaded on demand |
+| H2 sections with URLs | Branch nodes with child triggers and shard IDs |
+| Markdown for machine readability | Shard content in Markdown, typed edges for structure |
+| Optional sections for secondary content | Low-access-count shards kept cold |
+
+Context Palace extends the llms.txt pattern in several ways:
+
+1. **Dynamic rather than static.** llms.txt is a file that someone writes and maintains. Context Palace's index is generated from the live shard tree — adding a shard with a trigger automatically updates the navigable index.
+
+2. **Access-count feedback.** llms.txt has no usage data. Context Palace tracks which shards agents actually load, enabling the promotion pattern described above.
+
+3. **Typed relationships.** llms.txt is a flat list of links. Context Palace's edges (child-of, blocked-by, implements) encode structure that enables queries like "what's affected by this change?"
+
+4. **Multi-agent scoping.** llms.txt serves one consumer. Context Palace can present different views of the same knowledge tree to different agents based on their domain (e.g., penfold sees pipeline knowledge, steve sees TUI knowledge).
+
+The core insight is shared: **give the LLM an index it can navigate, not a dump it must parse.** Whether that's a `/llms.txt` file at a web root or a playbook loaded at session start, the pattern is the same — a small, always-available document that tells the agent what knowledge exists and how to access it.
+
 ## Design Principles
 
 ### Write for the Agent, Not the Human
@@ -168,4 +233,6 @@ Context Palace supports this with access logging (identifying stale shards), wee
 
 2. Agarwal, S., Kang, S.Y., & Kim, D. (2025). "Decoding the Configuration of AI Coding Agents: An Empirical Study on Claude Code Projects." arXiv:2511.09268v1. — Empirical analysis of 328 CLAUDE.md files showing that architecture documentation (72.6%) and development guidelines (44.8%) are the most common configuration patterns.
 
-3. Paul, G. (2023). "Aider Repository Map." — Tree-sitter AST + PageRank approach to codebase navigation. Captures code structure but not operational semantics or design intent.
+3. Howard, J. (2024). "/llms.txt — A Proposal for Standardised LLM-Readable Website Content." llmstxt.org. — Standardised index files for making web content navigable by LLMs. Context Palace's playbook follows the same index-with-pointers pattern.
+
+4. Paul, G. (2023). "Aider Repository Map." — Tree-sitter AST + PageRank approach to codebase navigation. Captures code structure but not operational semantics or design intent.
