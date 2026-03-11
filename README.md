@@ -11,6 +11,16 @@ There are two distinct systems built on this primitive:
 1. **Knowledge Base** — durable institutional memory. Versioned, tree-structured, designed to be navigated and searched across sessions. This is what agents *think* with.
 2. **Work Tracking** — ephemeral workflow. Designs, tasks, bugs that get created, worked, and closed. This is how agents *coordinate*.
 
+In real engineering workflows, these systems often form a lifecycle:
+
+`Spec -> Design/Work Shards -> Knowledge Shards`
+
+- **Specs** define intended architecture and constraints while a system is being built
+- **Design/task/bug shards** translate that intent into executable work and track drift during implementation
+- **Knowledge shards** capture implemented reality after the code is built, tested, and verified
+
+This keeps agents from depending forever on stale build-time specs while still preserving the original design intent.
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                      Context Palace                         │

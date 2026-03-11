@@ -2,6 +2,16 @@
 
 Context Palace organises knowledge into a navigable tree of **shards** — small, focused documents with typed edges, trigger-based loading, and tiered access patterns. This architecture is grounded in academic research on how LLM agents manage context across sessions.
 
+For engineering projects, the most effective operating model is usually not "put everything in the KB from day one." It is a staged lifecycle:
+
+`Spec -> Design/WorkItem Shard -> KB Shard`
+
+- **Specs** hold intended architecture and hard constraints while a subsystem is being designed and built
+- **Design/task/bug shards** turn that intent into executable work, status, blockers, and proof boundaries
+- **Knowledge shards** are written after implementation is real, tested, and worth retrieving as operational truth
+
+This matters because build-time intent and post-implementation reality are not the same thing. Agents need both, but at different times.
+
 ## The Problem
 
 LLM agents face a fundamental tension: they need access to large amounts of project knowledge, but their context windows are finite and expensive. The naive approaches both fail:
@@ -117,6 +127,125 @@ These relationships enable queries that flat files can't support: "what knowledg
 ### 5. Search as Fallback
 
 Tree navigation handles known-unknowns (the agent knows where to look). But for unknown-unknowns, Context Palace provides hybrid search across all shards — BM25 for keyword matches plus vector similarity for semantic matches. The paper identified this gap: their keyword-matching retrieval service worked but missed semantic connections. Context Palace's hybrid search addresses this.
+
+## The Engineering Lifecycle: Spec -> Work -> KB
+
+This is the pattern that tends to work best for AI coding agents on real software projects.
+
+### Phase 1: Spec
+
+At the start of a subsystem, the most useful artifact is often a spec:
+
+- intended architecture
+- constraints and contracts
+- acceptance intent
+- boundaries between components
+
+At this stage, the spec is the best available source of truth because the code either does not exist yet or is incomplete.
+
+### Phase 2: Design and Work Shards
+
+Once implementation begins, agents should not work directly from a large spec alone. The spec must be translated into executable work:
+
+- a `design` shard for the implementation slice or phase
+- child `task` shards for concrete work items
+- `bug` shards for defects discovered during implementation or review
+
+These shards do the operational work that specs do poorly:
+
+- define exact scope
+- track status and ownership
+- record blockers and decisions
+- attach proving tests and artifact links
+- capture implementation drift as it happens
+
+This is where the "AI coding loop" lives: define the slice, define the proof, do the work, validate it, close the shard.
+
+### Phase 3: Knowledge Shard
+
+After the code is implemented and verified, a KB shard can become the retrieval-first document for that subsystem.
+
+A good KB shard for implemented software should include:
+
+- what the system does now
+- where the code lives
+- what tests prove it
+- known operational constraints
+- accepted differences from the original spec
+- triggers that tell future agents when to load it
+
+At this point, the spec is no longer the primary working context for day-to-day implementation. It becomes historical design intent. The KB shard becomes active memory because it reflects implemented reality.
+
+### Why This Works Better Than Spec-Only
+
+If agents keep loading old specs after a subsystem has evolved, they inherit stale assumptions:
+
+- old interfaces
+- outdated flow diagrams
+- superseded persistence rules
+- missing implementation caveats
+
+That creates exactly the kind of drift-induced failure the architecture is trying to avoid.
+
+The lifecycle solves this cleanly:
+
+- **Spec** answers: what are we trying to build?
+- **Work shards** answer: what exactly are we doing now, and how do we know it is done?
+- **KB shard** answers: how does this implemented system actually work?
+
+### Why This Works Well for AI Coding Agents
+
+AI coding agents perform best when the active context matches the actual phase of work:
+
+- During build-out, they need constraints and proving tests more than polished reference docs
+- During execution, they need bounded tasks and explicit acceptance criteria
+- After implementation, they need concise retrieval-oriented operational knowledge, not the full history of design deliberation
+
+This lifecycle keeps context aligned with the task:
+
+| Phase | Primary artifact | What the agent needs most |
+|------|------------------|---------------------------|
+| Before implementation | Spec | intent, constraints, architecture |
+| During implementation | Design/task/bug shards | scope, status, proof boundary, drift capture |
+| After implementation | KB shard | implemented reality, code entry points, operating knowledge |
+
+That improves agent performance in three ways:
+
+1. **Less stale context.** Agents stop depending on design-time documents once implementation has diverged.
+2. **Better task focus.** Work shards define a narrow slice with an explicit proof boundary.
+3. **Better reuse.** Once verified, the KB shard becomes a reusable context package for future agents and future sessions.
+
+### Promotion Rule: When Something Becomes KB
+
+Not every work shard should become a knowledge shard. Promotion should happen only when:
+
+- the code exists
+- the proving tests exist
+- the implementation is stable enough to be reused
+- the knowledge is likely to matter again
+
+In short: **no KB shard without proof**.
+
+The proof is normally:
+
+- code references
+- passing unit/integration/e2e tests
+- artifact links from the completed work shard
+
+### What Happens to the Spec?
+
+The spec should not necessarily be deleted. In most projects it becomes:
+
+- historical design intent
+- a reference for why the system started the way it did
+- a useful comparison point when intentional drift is accepted
+
+But it should stop being the default active retrieval target once the KB shard exists and reflects verified implementation.
+
+This is the key distinction:
+
+- **Specs are for building**
+- **KB shards are for operating and extending**
 
 ## Access-Count Promotion — Reducing Navigation Calls
 
