@@ -1,0 +1,801 @@
+package client
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/otherjamesbrown/context-palace/cxp/internal/embedding"
+)
+
+// ValidShardTypes is the canonical list of allowed shard types
+var ValidShardTypes = []string{
+	"design", "bug", "task", "knowledge", "memory", "message", "handoff",
+}
+
+// RetiredTypeHints maps retired types to their replacement
+var RetiredTypeHints = map[string]string{
+	"epic":      "design",
+	"spec":      "design",
+	"feature":   "design",
+	"reference": "knowledge",
+	"report":    "knowledge",
+	"journal":   "knowledge",
+}
+
+// ValidateShardType checks if a shard type is valid, returning a helpful error for retired types
+func ValidateShardType(shardType string) error {
+	for _, valid := range ValidShardTypes {
+		if shardType == valid {
+			return nil
+		}
+	}
+	if replacement, ok := RetiredTypeHints[shardType]; ok {
+		return fmt.Errorf("type %q is retired. Use %q instead.\n  Retired types: epic→design, spec→design, feature→design, reference→knowledge, journal→knowledge, report→knowledge\n  Valid types: %s",
+			shardType, replacement, fmt.Sprintf("%v", ValidShardTypes))
+	}
+	return fmt.Errorf("unknown type %q. Valid types: %s",
+		shardType, fmt.Sprintf("%v", ValidShardTypes))
+}
+
+// Shard represents a Context Palace shard
+type Shard struct {
+	ID          string          `json:"id" yaml:"id"`
+	Project     string          `json:"project" yaml:"project"`
+	Title       string          `json:"title" yaml:"title"`
+	Description *string         `json:"description,omitempty" yaml:"description,omitempty"`
+	Content     string          `json:"content,omitempty" yaml:"content,omitempty"`
+	Type        string          `json:"type" yaml:"type"`
+	Status      string          `json:"status" yaml:"status"`
+	Priority    *int            `json:"priority,omitempty" yaml:"priority,omitempty"`
+	Creator     string          `json:"creator" yaml:"creator"`
+	Owner       *string         `json:"owner,omitempty" yaml:"owner,omitempty"`
+	CreatedAt   time.Time       `json:"created_at" yaml:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at" yaml:"updated_at"`
+	Metadata    json.RawMessage `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+	Labels      []string        `json:"labels,omitempty" yaml:"labels,omitempty"`
+	Artifacts   []Artifact      `json:"artifacts,omitempty" yaml:"artifacts,omitempty"`
+}
+
+// Artifact represents a task artifact
+type Artifact struct {
+	Type        string `json:"type" yaml:"type"`
+	Reference   string `json:"reference" yaml:"reference"`
+	Description string `json:"description" yaml:"description"`
+}
+
+// ShardCounts holds shard count statistics
+type ShardCounts struct {
+	Total  int `json:"total" yaml:"total"`
+	Open   int `json:"open" yaml:"open"`
+	Closed int `json:"closed" yaml:"closed"`
+	Other  int `json:"other" yaml:"other"`
+}
+
+// GetShardCounts returns shard count statistics for a project
+func (c *Client) GetShardCounts(ctx context.Context) (*ShardCounts, error) {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(ctx)
+
+	counts := &ShardCounts{}
+	err = conn.QueryRow(ctx, `
+		SELECT
+			count(*),
+			count(*) FILTER (WHERE status IN ('open', 'ready', 'in_progress', 'needs-review')),
+			count(*) FILTER (WHERE status = 'closed'),
+			count(*) FILTER (WHERE status NOT IN ('open', 'ready', 'in_progress', 'needs-review', 'closed'))
+		FROM shards WHERE project = $1
+	`, c.Config.Project).Scan(&counts.Total, &counts.Open, &counts.Closed, &counts.Other)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query shard counts: %v", err)
+	}
+	return counts, nil
+}
+
+// GetShard fetches a shard by ID
+func (c *Client) GetShard(ctx context.Context, id string) (*Shard, error) {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(ctx)
+
+	var s Shard
+	err = conn.QueryRow(ctx, `
+		SELECT id, project, title, description, COALESCE(content, ''), type, status,
+			priority, creator, owner, created_at, updated_at,
+			COALESCE(metadata, '{}')
+		FROM shards WHERE id = $1
+	`, id).Scan(&s.ID, &s.Project, &s.Title, &s.Description, &s.Content, &s.Type, &s.Status,
+		&s.Priority, &s.Creator, &s.Owner, &s.CreatedAt, &s.UpdatedAt,
+		&s.Metadata)
+
+	if err == pgx.ErrNoRows {
+		return nil, fmt.Errorf("shard not found: %s", id)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch shard: %v", err)
+	}
+
+	// Fetch labels
+	rows, err := conn.Query(ctx, `SELECT label FROM labels WHERE shard_id = $1 ORDER BY label`, id)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var label string
+			if rows.Scan(&label) == nil {
+				s.Labels = append(s.Labels, label)
+			}
+		}
+	}
+
+	return &s, nil
+}
+
+// GetTask fetches a task by ID with its artifacts
+func (c *Client) GetTask(ctx context.Context, id string) (*Shard, error) {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(ctx)
+
+	var s Shard
+	err = conn.QueryRow(ctx, `
+		SELECT id, project, title, COALESCE(content, ''), type, status,
+			priority, creator, owner, created_at, updated_at
+		FROM shards WHERE id = $1 AND type IN ('task', 'backlog')
+	`, id).Scan(&s.ID, &s.Project, &s.Title, &s.Content, &s.Type, &s.Status,
+		&s.Priority, &s.Creator, &s.Owner, &s.CreatedAt, &s.UpdatedAt)
+
+	if err == pgx.ErrNoRows {
+		return nil, fmt.Errorf("task not found: %s", id)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch task: %v", err)
+	}
+
+	// Fetch artifacts
+	rows, err := conn.Query(ctx, `SELECT * FROM get_artifacts($1)`, id)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var a Artifact
+			var createdAt time.Time
+			if rows.Scan(&a.Type, &a.Reference, &a.Description, &createdAt) == nil {
+				s.Artifacts = append(s.Artifacts, a)
+			}
+		}
+	}
+
+	return &s, nil
+}
+
+// ClaimTask claims a task for the configured agent
+func (c *Client) ClaimTask(ctx context.Context, id string) (bool, error) {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer conn.Close(ctx)
+
+	var success bool
+	err = conn.QueryRow(ctx, `SELECT claim_task($1, $2)`, id, c.Config.Agent).Scan(&success)
+	if err != nil {
+		return false, fmt.Errorf("failed to claim task: %v", err)
+	}
+	return success, nil
+}
+
+// FormatProgressNote formats a progress note for appending to shard content.
+func FormatProgressNote(timestamp, agent, note string) string {
+	return fmt.Sprintf("\n\n---\n**[%s] %s:** %s", timestamp, agent, note)
+}
+
+// AddProgress adds a progress note to a task
+func (c *Client) AddProgress(ctx context.Context, id, note string) error {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close(ctx)
+
+	progressNote := FormatProgressNote(time.Now().Format("2006-01-02 15:04:05"), c.Config.Agent, note)
+
+	result, err := conn.Exec(ctx, `
+		UPDATE shards SET content = content || $1, updated_at = NOW()
+		WHERE id = $2 AND type IN ('task', 'backlog')
+	`, progressNote, id)
+
+	if err != nil {
+		return fmt.Errorf("failed to add progress note: %v", err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("task not found: %s", id)
+	}
+	return nil
+}
+
+// CloseTask closes a task with a summary
+func (c *Client) CloseTask(ctx context.Context, id, summary string) error {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close(ctx)
+
+	_, err = conn.Exec(ctx, `SELECT close_task($1, $2)`, id, summary)
+	if err != nil {
+		return fmt.Errorf("failed to close task: %v", err)
+	}
+	return nil
+}
+
+// AddArtifact adds an artifact to a task
+func (c *Client) AddArtifact(ctx context.Context, id, artifactType, reference, description string) error {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close(ctx)
+
+	_, err = conn.Exec(ctx, `SELECT add_artifact($1, $2, $3, $4)`, id, artifactType, reference, description)
+	if err != nil {
+		return fmt.Errorf("failed to add artifact: %v", err)
+	}
+	return nil
+}
+
+// CreateShard creates a new shard and returns its ID
+func (c *Client) CreateShard(ctx context.Context, title, content, shardType string, priority *int, labels []string) (string, error) {
+	return c.CreateShardWithMetadata(ctx, title, content, shardType, priority, labels, nil)
+}
+
+// CreateShardWithMetadata creates a new shard with metadata and returns its ID
+func (c *Client) CreateShardWithMetadata(ctx context.Context, title, content, shardType string, priority *int, labels []string, metadata json.RawMessage) (string, error) {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close(ctx)
+
+	if labels == nil {
+		labels = []string{}
+	}
+	if metadata == nil {
+		metadata = json.RawMessage("{}")
+	}
+
+	var newID string
+	err = conn.QueryRow(ctx, `
+		SELECT create_shard($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	`, c.Config.Project, c.Config.Agent, title, content, shardType,
+		labels, nil, priority, metadata).Scan(&newID)
+	if err != nil {
+		return "", fmt.Errorf("failed to create shard: %v", err)
+	}
+
+	// Embed-on-write: synchronous, non-fatal
+	c.tryEmbed(ctx, newID, shardType, title, content)
+
+	return newID, nil
+}
+
+// CreateShardWithMetadataAndID creates a new shard with metadata and a custom ID, and returns its ID
+func (c *Client) CreateShardWithMetadataAndID(ctx context.Context, customID, title, content, shardType string, priority *int, labels []string, metadata json.RawMessage) (string, error) {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close(ctx)
+
+	if labels == nil {
+		labels = []string{}
+	}
+	if metadata == nil {
+		metadata = json.RawMessage("{}")
+	}
+
+	var newID string
+	err = conn.QueryRow(ctx, `
+		SELECT create_shard($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+	`, c.Config.Project, c.Config.Agent, title, content, shardType,
+		labels, nil, priority, metadata, customID).Scan(&newID)
+	if err != nil {
+		return "", fmt.Errorf("failed to create shard: %v", err)
+	}
+
+	// Embed-on-write: synchronous, non-fatal
+	c.tryEmbed(ctx, newID, shardType, title, content)
+
+	return newID, nil
+}
+
+// UpdateShardContent updates a shard's content
+func (c *Client) UpdateShardContent(ctx context.Context, id, content string) error {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close(ctx)
+
+	// Fetch type and title for embedding text
+	var shardType, title string
+	_ = conn.QueryRow(ctx, `SELECT type, title FROM shards WHERE id = $1`, id).Scan(&shardType, &title)
+
+	result, err := conn.Exec(ctx, `
+		UPDATE shards SET content = $1, updated_at = NOW() WHERE id = $2
+	`, content, id)
+	if err != nil {
+		return fmt.Errorf("failed to update shard: %v", err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("shard not found: %s", id)
+	}
+
+	// Embed-on-write: synchronous, non-fatal
+	c.tryEmbed(ctx, id, shardType, title, content)
+
+	return nil
+}
+
+// AppendShardContent appends content to a shard with a separator showing
+// timestamp and agent identity. Works on any shard type.
+func (c *Client) AppendShardContent(ctx context.Context, id, newContent string) error {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close(ctx)
+
+	// Read existing content
+	var existing, shardType, title string
+	err = conn.QueryRow(ctx, `SELECT COALESCE(content, ''), type, title FROM shards WHERE id = $1`, id).
+		Scan(&existing, &shardType, &title)
+	if err != nil {
+		return fmt.Errorf("shard not found: %s", id)
+	}
+
+	// Build separator with timestamp and agent
+	agent := c.Config.Agent
+	if agent == "" {
+		agent = "unknown"
+	}
+	separator := fmt.Sprintf("\n\n---\n*Appended by %s at %s*\n\n",
+		agent, time.Now().UTC().Format("2006-01-02 15:04 UTC"))
+
+	combined := existing + separator + newContent
+
+	result, err := conn.Exec(ctx, `
+		UPDATE shards SET content = $1, updated_at = NOW() WHERE id = $2
+	`, combined, id)
+	if err != nil {
+		return fmt.Errorf("failed to append to shard: %v", err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("shard not found: %s", id)
+	}
+
+	// Embed-on-write
+	c.tryEmbed(ctx, id, shardType, title, combined)
+
+	return nil
+}
+
+// UpdateShardStatus updates a shard's status
+func (c *Client) UpdateShardStatus(ctx context.Context, id, status string) error {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close(ctx)
+
+	result, err := conn.Exec(ctx, `
+		UPDATE shards SET status = $1, updated_at = NOW() WHERE id = $2
+	`, status, id)
+	if err != nil {
+		return fmt.Errorf("failed to update shard status: %v", err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("shard not found: %s", id)
+	}
+	return nil
+}
+
+// ListShardsByType lists shards of a given type for the configured project
+func (c *Client) ListShardsByType(ctx context.Context, shardType string, statusFilter string, limit int) ([]Shard, error) {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(ctx)
+
+	query := `
+		SELECT id, project, title, COALESCE(LEFT(content, 200), ''), type, status,
+			priority, creator, owner, created_at, updated_at,
+			COALESCE(metadata, '{}')
+		FROM shards WHERE project = $1 AND type = $2
+	`
+	args := []interface{}{c.Config.Project, shardType}
+
+	if statusFilter != "" {
+		query += ` AND status = $3`
+		args = append(args, statusFilter)
+		query += ` ORDER BY priority NULLS LAST, created_at DESC LIMIT $4`
+		args = append(args, limit)
+	} else {
+		query += ` ORDER BY priority NULLS LAST, created_at DESC LIMIT $3`
+		args = append(args, limit)
+	}
+
+	rows, err := conn.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list shards: %v", err)
+	}
+	defer rows.Close()
+
+	var shards []Shard
+	for rows.Next() {
+		var s Shard
+		if err := rows.Scan(&s.ID, &s.Project, &s.Title, &s.Content, &s.Type, &s.Status,
+			&s.Priority, &s.Creator, &s.Owner, &s.CreatedAt, &s.UpdatedAt,
+			&s.Metadata); err != nil {
+			continue
+		}
+		shards = append(shards, s)
+	}
+	return shards, nil
+}
+
+// SearchShards does full-text search across shards
+func (c *Client) SearchShards(ctx context.Context, query string, shardType string, limit int) ([]Shard, error) {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(ctx)
+
+	sqlQuery := `
+		SELECT id, project, title, COALESCE(LEFT(content, 200), ''), type, status,
+			priority, creator, owner, created_at, updated_at,
+			COALESCE(metadata, '{}'),
+			ts_rank(search_vector, plainto_tsquery($2)) AS rank
+		FROM shards
+		WHERE project = $1 AND search_vector @@ plainto_tsquery($2)
+	`
+	args := []interface{}{c.Config.Project, query}
+
+	if shardType != "" {
+		sqlQuery += ` AND type = $3 ORDER BY rank DESC LIMIT $4`
+		args = append(args, shardType, limit)
+	} else {
+		sqlQuery += ` ORDER BY rank DESC LIMIT $3`
+		args = append(args, limit)
+	}
+
+	rows, err := conn.Query(ctx, sqlQuery, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search shards: %v", err)
+	}
+	defer rows.Close()
+
+	var shards []Shard
+	for rows.Next() {
+		var s Shard
+		var rank float64
+		if err := rows.Scan(&s.ID, &s.Project, &s.Title, &s.Content, &s.Type, &s.Status,
+			&s.Priority, &s.Creator, &s.Owner, &s.CreatedAt, &s.UpdatedAt,
+			&s.Metadata, &rank); err != nil {
+			continue
+		}
+		shards = append(shards, s)
+	}
+	return shards, nil
+}
+
+// SearchShardsWithLabels does full-text search across shards with optional label pre-filtering.
+func (c *Client) SearchShardsWithLabels(ctx context.Context, query string, shardType string, labels []string, limit int) ([]Shard, error) {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(ctx)
+
+	sqlQuery := `
+		SELECT id, project, title, COALESCE(LEFT(content, 200), ''), type, status,
+			priority, creator, owner, created_at, updated_at,
+			COALESCE(metadata, '{}'),
+			ts_rank(search_vector, plainto_tsquery($2)) AS rank
+		FROM shards
+		WHERE project = $1 AND search_vector @@ plainto_tsquery($2)
+	`
+	args := []interface{}{c.Config.Project, query}
+	argIdx := 3
+
+	if shardType != "" {
+		sqlQuery += fmt.Sprintf(` AND type = $%d`, argIdx)
+		args = append(args, shardType)
+		argIdx++
+	}
+	if len(labels) > 0 {
+		sqlQuery += fmt.Sprintf(` AND labels && $%d`, argIdx)
+		args = append(args, labels)
+		argIdx++
+	}
+
+	sqlQuery += fmt.Sprintf(` ORDER BY rank DESC LIMIT $%d`, argIdx)
+	args = append(args, limit)
+
+	rows, err := conn.Query(ctx, sqlQuery, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search shards: %v", err)
+	}
+	defer rows.Close()
+
+	var shards []Shard
+	for rows.Next() {
+		var s Shard
+		var rank float64
+		if err := rows.Scan(&s.ID, &s.Project, &s.Title, &s.Content, &s.Type, &s.Status,
+			&s.Priority, &s.Creator, &s.Owner, &s.CreatedAt, &s.UpdatedAt,
+			&s.Metadata, &rank); err != nil {
+			continue
+		}
+		shards = append(shards, s)
+	}
+	return shards, nil
+}
+
+// ListShardsOpts holds filter options for ListShardsFiltered
+type ListShardsOpts struct {
+	Types     []string
+	Status    []string
+	Labels    []string
+	Creator   string
+	Owner     string
+	Search    string
+	Since     *time.Time
+	Limit     int
+	Offset    int
+	RootsOnly bool
+}
+
+// ShardListResult holds a shard list item from list_shards()
+type ShardListResult struct {
+	ID        string    `json:"id"`
+	Title     string    `json:"title"`
+	Type      string    `json:"type"`
+	Status    string    `json:"status"`
+	Creator   string    `json:"creator"`
+	Labels    []string  `json:"labels,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Snippet   string    `json:"snippet,omitempty"`
+}
+
+// ListShardsFiltered lists shards using the list_shards() SQL function with all filters
+func (c *Client) ListShardsFiltered(ctx context.Context, opts ListShardsOpts) ([]ShardListResult, error) {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(ctx)
+
+	var typesArg, statusArg, labelsArg, creatorArg, searchArg, sinceArg, ownerArg any
+	if opts.Types != nil {
+		typesArg = opts.Types
+	}
+	if opts.Status != nil {
+		statusArg = opts.Status
+	}
+	if opts.Labels != nil {
+		labelsArg = opts.Labels
+	}
+	if opts.Creator != "" {
+		creatorArg = opts.Creator
+	}
+	if opts.Search != "" {
+		searchArg = opts.Search
+	}
+	if opts.Since != nil {
+		sinceArg = *opts.Since
+	}
+	if opts.Owner != "" {
+		ownerArg = opts.Owner
+	}
+
+	limit := opts.Limit
+	if limit == 0 {
+		limit = 20
+	}
+
+	rows, err := conn.Query(ctx, `
+		SELECT id, title, type, status, creator, labels, created_at, updated_at, snippet
+		FROM list_shards($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+	`, c.Config.Project, typesArg, statusArg, labelsArg, creatorArg, searchArg, sinceArg, limit, opts.Offset, opts.RootsOnly, ownerArg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list shards: %v", err)
+	}
+	defer rows.Close()
+
+	var results []ShardListResult
+	for rows.Next() {
+		var r ShardListResult
+		if err := rows.Scan(&r.ID, &r.Title, &r.Type, &r.Status, &r.Creator,
+			&r.Labels, &r.CreatedAt, &r.UpdatedAt, &r.Snippet); err != nil {
+			return nil, fmt.Errorf("failed to scan shard: %v", err)
+		}
+		results = append(results, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("shard list iteration error: %v", err)
+	}
+	return results, nil
+}
+
+// ListShardsCount returns the total count of shards matching the given filters
+func (c *Client) ListShardsCount(ctx context.Context, opts ListShardsOpts) (int, error) {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer conn.Close(ctx)
+
+	var typesArg, statusArg, labelsArg, creatorArg, searchArg, sinceArg, ownerArg any
+	if opts.Types != nil {
+		typesArg = opts.Types
+	}
+	if opts.Status != nil {
+		statusArg = opts.Status
+	}
+	if opts.Labels != nil {
+		labelsArg = opts.Labels
+	}
+	if opts.Creator != "" {
+		creatorArg = opts.Creator
+	}
+	if opts.Search != "" {
+		searchArg = opts.Search
+	}
+	if opts.Since != nil {
+		sinceArg = *opts.Since
+	}
+	if opts.Owner != "" {
+		ownerArg = opts.Owner
+	}
+
+	var count int
+	err = conn.QueryRow(ctx, `SELECT list_shards_count($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		c.Config.Project, typesArg, statusArg, labelsArg, creatorArg, searchArg, sinceArg, opts.RootsOnly, ownerArg).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count shards: %v", err)
+	}
+	return count, nil
+}
+
+// UpdateShardResult holds the result of an update_shard() call
+type UpdateShardResult struct {
+	ID                 string    `json:"id"`
+	UpdatedAt          time.Time `json:"updated_at"`
+	TitleChanged       bool      `json:"title_changed,omitempty"`
+	ContentChanged     bool      `json:"content_changed,omitempty"`
+	ShardType          string    `json:"shard_type"`
+	DescriptionChanged bool      `json:"description_changed,omitempty"`
+}
+
+// UpdateShardFields updates a shard's title, content, and/or description using update_shard()
+func (c *Client) UpdateShardFields(ctx context.Context, id string, title *string, content *string, description *string) (*UpdateShardResult, error) {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(ctx)
+
+	var titleArg, contentArg, descArg any
+	if title != nil {
+		titleArg = *title
+	}
+	if content != nil {
+		contentArg = *content
+	}
+	if description != nil {
+		descArg = *description
+	}
+
+	var r UpdateShardResult
+	err = conn.QueryRow(ctx, `
+		SELECT id, updated_at, title_changed, content_changed, shard_type, description_changed
+		FROM update_shard($1, $2, $3, $4, $5)
+	`, id, c.Config.Project, titleArg, contentArg, descArg).Scan(
+		&r.ID, &r.UpdatedAt, &r.TitleChanged, &r.ContentChanged, &r.ShardType, &r.DescriptionChanged)
+	if err != nil {
+		return nil, fmt.Errorf("%s", extractPgMessage(err.Error()))
+	}
+
+	// Re-embed if content changed
+	if content != nil {
+		var shardTitle string
+		if title != nil {
+			shardTitle = *title
+		}
+		c.tryEmbed(ctx, id, r.ShardType, shardTitle, *content)
+	}
+
+	return &r, nil
+}
+
+// ShardChild holds a child shard summary for the children section of shard show
+type ShardChild struct {
+	ID          string  `json:"id"`
+	Title       string  `json:"title"`
+	Description *string `json:"description,omitempty"`
+	Type        string  `json:"type"`
+	Status      string  `json:"status"`
+}
+
+// GetShardChildren returns child shards (by parent_id) for a given shard
+func (c *Client) GetShardChildren(ctx context.Context, parentID string) ([]ShardChild, error) {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(ctx)
+
+	rows, err := conn.Query(ctx, `
+		SELECT id, title, description, type, status
+		FROM shards
+		WHERE parent_id = $1 AND project = $2
+		ORDER BY
+			CASE status
+				WHEN 'in_progress' THEN 0
+				WHEN 'needs-review' THEN 1
+				WHEN 'ready' THEN 2
+				WHEN 'open' THEN 3
+				WHEN 'closed' THEN 4
+			END,
+			priority NULLS LAST, created_at
+	`, parentID, c.Config.Project)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get shard children: %v", err)
+	}
+	defer rows.Close()
+
+	var children []ShardChild
+	for rows.Next() {
+		var ch ShardChild
+		if err := rows.Scan(&ch.ID, &ch.Title, &ch.Description, &ch.Type, &ch.Status); err != nil {
+			return nil, fmt.Errorf("failed to scan shard child: %v", err)
+		}
+		children = append(children, ch)
+	}
+	return children, nil
+}
+
+// tryEmbed attempts to embed a shard's content. Non-fatal: silently ignores errors.
+func (c *Client) tryEmbed(ctx context.Context, id, shardType, title, content string) {
+	if c.EmbedProvider == nil {
+		return
+	}
+
+	text := embedding.BuildEmbeddingText(shardType, title, content)
+	if text == "" {
+		return
+	}
+
+	// Use a separate context with timeout so embedding doesn't block forever
+	embedCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	vec, err := c.EmbedProvider.Embed(embedCtx, text)
+	if err != nil {
+		return // Silent failure — shard was already created/updated
+	}
+
+	_ = c.UpdateEmbedding(ctx, id, vec)
+}
