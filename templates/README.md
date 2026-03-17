@@ -43,7 +43,7 @@ Copy templates into the project directory with placeholders replaced:
 ├── context-palace.md                  ← full CP usage guide
 ├── docs/
 │   ├── ways-of-working.md            ← from templates/ways-of-working.md
-│   └── SPEC-TEMPLATE.md              ← from specs/cp-cli/SPEC-TEMPLATE.md
+│   └── SPEC-TEMPLATE.md              ← from specs/cxp-cli/SPEC-TEMPLATE.md
 └── .claude/
     └── commands/
         └── ingest.md                  ← from templates/ingest.md
@@ -78,7 +78,7 @@ The user then:
 The penfold project (`~/github/otherjamesbrown/penfold/`) is the reference implementation:
 - Full 8-file ingest pipeline in `.claude/commands/`
 - Customized ways-of-working with quality metrics for email processing
-- SPEC-TEMPLATE used for cp-cli specs
+- SPEC-TEMPLATE used for cxp-cli specs
 
 New projects should start from the templates and reference penfold for examples of
 how to flesh out the phase files.

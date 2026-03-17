@@ -116,16 +116,20 @@ CREATE TABLE shards (
   id          TEXT PRIMARY KEY DEFAULT gen_shard_id(),
   project     TEXT NOT NULL,                 -- Project namespace: 'penfold', 'context-palace', etc.
   title       TEXT NOT NULL CHECK (char_length(title) <= 500),
+  description TEXT,
   content     TEXT,
   type        TEXT,                          -- 'task', 'message', 'log', 'config', 'doc', etc.
   status      TEXT NOT NULL DEFAULT 'open',  -- 'open', 'in_progress', 'closed'
   priority    INTEGER CHECK (priority >= 0 AND priority <= 4),
   creator     TEXT NOT NULL,
   owner       TEXT,
+  labels      TEXT[] DEFAULT '{}',
   parent_id   TEXT REFERENCES shards(id),
+  metadata    JSONB DEFAULT '{}',
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   closed_at   TIMESTAMPTZ,
+  closed_by   TEXT,
   closed_reason TEXT
 );
 
@@ -162,7 +166,9 @@ CREATE INDEX idx_edges_type ON edges(edge_type);
 
 ### labels
 
-Tags on shards.
+Legacy normalized labels table used by older helper functions. The active CLI and
+current migrations also store labels on `shards.labels`, so both representations
+exist in the repo today and the docs need to account for that dual state.
 
 ```sql
 CREATE TABLE labels (

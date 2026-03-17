@@ -29,7 +29,7 @@ Do NOT check the inbox — context is injected by the hook.
 
 | System | Server | Config |
 |--------|--------|--------|
-| Context Palace | dev02.brown.chat:5432 | ~/.cp/config.yaml |
+| Context Palace | dev02.brown.chat:5432 | ~/.cxp/config.yaml |
 
 - **CP usage guide:** context-palace.md
 - **User preferences:** ~/github/otherjamesbrown/penf-cli/docs/preferences.md (NEVER modify)

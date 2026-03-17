@@ -1,4 +1,3 @@
-<!-- cp-template-version: 1 -->
 # SPEC-N: [Title]
 
 **Status:** Draft
@@ -69,7 +68,7 @@
      6. JSON output schema (for -o json)
 -->
 
-### `cp <noun> <verb>` — [Short Description]
+### `cxp <noun> <verb>` — [Short Description]
 
 ```bash
 # Example invocations

@@ -316,10 +316,10 @@ A **project** is a namespace with a unique ID prefix. Shards are scoped to a pro
 
 ## Configuration
 
-Config precedence: **env vars > `.cp.yaml` > `~/.cp/config.yaml` > defaults**
+Config precedence: **env vars > `.cxp.yaml` > `~/.cxp/config.yaml` > defaults**
 
 ```yaml
-# .cp.yaml (place in project root)
+# .cxp.yaml (place in project root)
 connection:
   host: dev02.brown.chat
   database: contextpalace
@@ -343,13 +343,13 @@ defaults:
   output: json
 ```
 
-Environment variables: `CP_HOST`, `CP_DATABASE`, `CP_USER`, `CP_PROJECT`, `CP_AGENT`.
+Environment variables: `CXP_HOST`, `CXP_DATABASE`, `CXP_USER`, `CXP_PROJECT`, `CXP_AGENT`.
 
 ## Setup
 
 See `setup.md` for step-by-step instructions for Claude Code instances, or `claude-template.md` for manual setup.
 
-1. Create `.cp.yaml` in your project root
+1. Create `.cxp.yaml` in your project root
 2. Ensure SSL certs are in `~/.postgresql/`
 3. Run `cxp status` to verify connection
 4. Ensure your project is registered in the `projects` table

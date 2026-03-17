@@ -23,7 +23,7 @@ You are **AGENT_NAME** on project **PROJECT** (shard prefix: `PREFIX-`).
 Context Palace is your shared memory and coordination system. Use the `cxp` CLI
 to track work, communicate with other agents, store knowledge, and search.
 
-**Config:** `.cp.yaml` in the project root.
+**Config:** `.cxp.yaml` in the project root.
 
 ### Quick Reference
 
@@ -102,7 +102,7 @@ You are **AGENT_NAME** on project **PROJECT** (shard prefix: `PREFIX-`).
 Context Palace is your shared memory and coordination system backed by PostgreSQL.
 Use the `cxp` CLI to track work, communicate, store knowledge, and search semantically.
 
-**Config:** `.cp.yaml` in the project root. Run `cxp status` to verify.
+**Config:** `.cxp.yaml` in the project root. Run `cxp status` to verify.
 
 ---
 
@@ -258,7 +258,7 @@ Good:
 ## Notes
 
 - The `cxp` binary must be on PATH (typically installed to `~/bin/cxp`).
-- Config is read from `.cp.yaml` in the working directory, then `~/.cp/config.yaml`.
+- Config is read from `.cxp.yaml` in the working directory, then `~/.cxp/config.yaml`.
 - SSL certificates for PostgreSQL must be in `~/.postgresql/`.
 - See `context-palace.md` in the Context Palace repo for the full reference including
   SQL functions, schema details, and advanced usage.
