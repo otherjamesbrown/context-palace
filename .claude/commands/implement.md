@@ -13,9 +13,13 @@ $ARGUMENTS
 ```
 
 Parse the input:
+- **Shard ID** — e.g. `pf-c70f10` to implement a specific shard
 - **Spec file path** — e.g. `specs/cp-cli/SPEC-9-test-coverage.md` or just `SPEC-9`
 - **Specific phase** — e.g. `SPEC-9 phase 2` to resume at a phase
-- If no arguments, check Context Palace inbox for assigned specs
+- If no arguments, show assigned work:
+  ```bash
+  cxp shard list --type bug,task --assigned-to agent-steve
+  ```
 
 ## Configuration
 
