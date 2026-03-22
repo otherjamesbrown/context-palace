@@ -66,7 +66,10 @@ func runPipelineSetup(cmd *cobra.Command, args []string) error {
 	}
 
 	// 7. Build pipeline config YAML
-	pipelineYAML := buildPipelineYAML(project, ownerRepo, buildCmds, testCmds)
+	pipelineYAML, err := buildPipelineYAML(project, ownerRepo, buildCmds, testCmds)
+		if err != nil {
+			return err
+		}
 
 	// 8. Prepare repos registry update
 	homeDir, err := os.UserHomeDir()
@@ -180,13 +183,12 @@ func detectOwnerRepo() string {
 
 // detectBuildSystem checks for language markers in the repo root and one level deep.
 func detectBuildSystem(repoRoot string) (build []string, test []string) {
-	// Check root and immediate subdirs for build markers
+	// findMarker returns the directory containing the marker file:
+	// "." for root, subdir name for one level deep, "" for not found.
 	findMarker := func(name string) string {
-		// Check root first
 		if _, err := os.Stat(filepath.Join(repoRoot, name)); err == nil {
-			return ""
+			return "."
 		}
-		// Check one level deep
 		entries, err := os.ReadDir(repoRoot)
 		if err != nil {
 			return ""
@@ -201,26 +203,43 @@ func detectBuildSystem(repoRoot string) (build []string, test []string) {
 		return ""
 	}
 
-	if subdir := findMarker("go.mod"); subdir != "" {
-		prefix := "cd " + subdir + " && "
-		return []string{prefix + "go build ./..."}, []string{prefix + "go test ./...", prefix + "go vet ./..."}
-	} else if _, err := os.Stat(filepath.Join(repoRoot, "go.mod")); err == nil {
-		return []string{"go build ./..."}, []string{"go test ./...", "go vet ./..."}
+	type langDef struct {
+		marker string
+		build  func(dir string) []string
+		test   func(dir string) []string
 	}
 
-	if _, err := os.Stat(filepath.Join(repoRoot, "package.json")); err == nil {
-		return []string{"npm run build"}, []string{"npm test"}
+	prefix := func(dir string) string {
+		if dir == "." {
+			return ""
+		}
+		return "cd " + dir + " && "
 	}
-	if _, err := os.Stat(filepath.Join(repoRoot, "Cargo.toml")); err == nil {
-		return []string{"cargo build"}, []string{"cargo test"}
+
+	langs := []langDef{
+		{"go.mod",
+			func(d string) []string { return []string{prefix(d) + "go build ./..."} },
+			func(d string) []string { return []string{prefix(d) + "go test ./...", prefix(d) + "go vet ./..."} }},
+		{"package.json",
+			func(d string) []string { return []string{prefix(d) + "npm run build"} },
+			func(d string) []string { return []string{prefix(d) + "npm test"} }},
+		{"Cargo.toml",
+			func(d string) []string { return []string{prefix(d) + "cargo build"} },
+			func(d string) []string { return []string{prefix(d) + "cargo test"} }},
+		{"pyproject.toml",
+			func(string) []string { return nil },
+			func(d string) []string { return []string{prefix(d) + "pytest"} }},
+		{"setup.py",
+			func(string) []string { return nil },
+			func(d string) []string { return []string{prefix(d) + "pytest"} }},
 	}
-	if _, err := os.Stat(filepath.Join(repoRoot, "pyproject.toml")); err == nil {
-		return []string{}, []string{"pytest"}
+
+	for _, lang := range langs {
+		if dir := findMarker(lang.marker); dir != "" {
+			return lang.build(dir), lang.test(dir)
+		}
 	}
-	if _, err := os.Stat(filepath.Join(repoRoot, "setup.py")); err == nil {
-		return []string{}, []string{"pytest"}
-	}
-	return []string{}, []string{}
+	return nil, nil
 }
 
 // detectDefaultBranch returns the default branch name from the remote.
@@ -238,7 +257,7 @@ func detectDefaultBranch() string {
 }
 
 // buildPipelineYAML generates the pipeline.yaml content as a string.
-func buildPipelineYAML(project, ownerRepo string, buildCmds, testCmds []string) string {
+func buildPipelineYAML(project, ownerRepo string, buildCmds, testCmds []string) (string, error) {
 	cfg := client.PipelineConfig{
 		Build: buildCmds,
 		Test:  testCmds,
@@ -256,9 +275,12 @@ func buildPipelineYAML(project, ownerRepo string, buildCmds, testCmds []string) 
 		SkillsDir: "skills",
 	}
 
-	data, _ := yaml.Marshal(cfg)
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return "", fmt.Errorf("marshaling pipeline config: %w", err)
+	}
 	header := fmt.Sprintf("# Pipeline configuration for %s\n# See: cxp pipeline setup --help\n\n", project)
-	return header + string(data)
+	return header + string(data), nil
 }
 
 // formatCmdList formats a command list for display.

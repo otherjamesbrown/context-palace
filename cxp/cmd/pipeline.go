@@ -218,11 +218,19 @@ func spawnM(ctx context.Context, repoRoot string, cfg *client.PipelineConfig, de
 		"You are M. Read your playbook at %s. Your pipeline shard is %s. Current trigger: %s.",
 		playbookPath, designID, trigger,
 	)
-	escapedPrompt := strings.ReplaceAll(prompt, "'", "'\\''")
-	shellCmd := fmt.Sprintf("cd '%s' && claude %s '%s'", strings.ReplaceAll(repoRoot, "'", "'\\''"), claudeFlags, escapedPrompt)
 
 	windowName := fmt.Sprintf("m-%s", designID)
-	tmuxArgs := []string{"new-window", "-n", windowName, "-t", tmuxSession, shellCmd}
+	tmuxArgs := []string{
+		"new-window",
+		"-c", repoRoot,
+		"-n", windowName,
+		"-t", tmuxSession,
+		"claude",
+	}
+	if claudeFlags != "" {
+		tmuxArgs = append(tmuxArgs, strings.Fields(claudeFlags)...)
+	}
+	tmuxArgs = append(tmuxArgs, prompt)
 
 	out, err := exec.CommandContext(ctx, "tmux", tmuxArgs...).CombinedOutput()
 	if err != nil {
