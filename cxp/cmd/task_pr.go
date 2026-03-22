@@ -117,12 +117,18 @@ var taskPRCreateCmd = &cobra.Command{
 	},
 }
 
-// detectRepo extracts the GitHub owner/repo from git remote origin URL.
-// Falls back to "otherjamesbrown/context-palace" if detection fails.
+// detectRepo extracts the GitHub owner/repo from pipeline config or git remote.
 func detectRepo(dir string) string {
+	// Check pipeline config first
+	pCfg, _ := client.LoadPipelineConfig(dir)
+	if pCfg != nil && pCfg.GitHub.OwnerRepo != "" {
+		return pCfg.GitHub.OwnerRepo
+	}
+
+	// Fall back to git remote detection
 	out, err := exec.Command("git", "-C", dir, "remote", "get-url", "origin").Output()
 	if err != nil {
-		return "otherjamesbrown/context-palace"
+		return ""
 	}
 	url := strings.TrimSpace(string(out))
 
@@ -133,7 +139,7 @@ func detectRepo(dir string) string {
 	if len(m) >= 2 {
 		return strings.TrimSuffix(m[1], ".git")
 	}
-	return "otherjamesbrown/context-palace"
+	return ""
 }
 
 // buildPRBody constructs the PR description from task info.

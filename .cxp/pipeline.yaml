@@ -1,0 +1,23 @@
+# Pipeline configuration for penfold
+# See: cxp pipeline setup --help
+
+build:
+    - cd cxp && go build ./...
+test:
+    - cd cxp && go test ./...
+    - cd cxp && go vet ./...
+agents:
+    agent-mycroft:
+        domains:
+            - backend
+            - services
+    agent-steve:
+        domains:
+            - cli
+            - migrations
+dispatch:
+    max_concurrent: 3
+    tmux_session: main
+github:
+    owner_repo: otherjamesbrown/context-palace
+skills_dir: skills
