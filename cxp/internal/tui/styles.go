@@ -176,6 +176,8 @@ func TypeIcon(shardType string) string {
 		return "m"
 	case "handoff":
 		return "H"
+	case "outcome":
+		return "O"
 	default:
 		return "*"
 	}
@@ -198,6 +200,8 @@ func TypeColor(shardType string) lipgloss.Color {
 		return lipgloss.Color("220") // yellow
 	case "handoff":
 		return lipgloss.Color("117") // light blue
+	case "outcome":
+		return lipgloss.Color("183") // lavender
 	case "board":
 		return lipgloss.Color("44") // cyan
 	default:

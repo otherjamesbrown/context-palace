@@ -13,7 +13,7 @@ import (
 
 // ValidShardTypes is the canonical list of allowed shard types
 var ValidShardTypes = []string{
-	"design", "bug", "task", "knowledge", "memory", "message", "handoff",
+	"design", "bug", "task", "outcome", "knowledge", "memory", "message", "handoff",
 }
 
 // RetiredTypeHints maps retired types to their replacement
