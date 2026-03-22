@@ -57,8 +57,8 @@ try:
         for task in wave.get('tasks', []):
             if task.get('status') in ('in_progress', 'needs-review'):
                 print(task['id'])
-except:
-    pass
+except Exception as e:
+    print(f'Error processing task deps: {e}', file=sys.stderr)
 " 2>/dev/null)
 
 if [ -n "$TASK_IDS" ]; then
@@ -66,10 +66,13 @@ if [ -n "$TASK_IDS" ]; then
     echo "## Task: $tid"
     cxp shard show "$tid" -o json 2>/dev/null | python3 -c "
 import sys, json
-d = json.load(sys.stdin)
-print(f\"Title: {d['title']}\")
-print(f\"Status: {d['status']}\")
-print(f\"Content: {d['content'][:500]}...\")
+try:
+    d = json.load(sys.stdin)
+    print(f\"Title: {d['title']}\")
+    print(f\"Status: {d['status']}\")
+    print(f\"Content: {d['content'][:500]}...\")
+except Exception as e:
+    print(f'Error reading task: {e}', file=sys.stderr)
 " 2>/dev/null || true
     echo ""
   done

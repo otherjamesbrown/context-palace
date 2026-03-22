@@ -120,7 +120,7 @@ var taskDispatchCmd = &cobra.Command{
 		// 6. Build tmux command
 		// Escape single quotes in prompt for shell
 		escapedPrompt := strings.ReplaceAll(prompt, "'", "'\\''")
-		tmuxCmd := fmt.Sprintf("cd %s && claude --print '%s'", worktreePath, escapedPrompt)
+		tmuxCmd := fmt.Sprintf("cd '%s' && claude --print '%s'", strings.ReplaceAll(worktreePath, "'", "'\\''"), escapedPrompt)
 		tmuxArgs := []string{"new-window", "-n", taskID, "-t", "main", tmuxCmd}
 
 		// Dry-run: print everything and exit

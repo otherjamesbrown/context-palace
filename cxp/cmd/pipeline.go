@@ -187,7 +187,7 @@ func spawnM(ctx context.Context, repoRoot, designID, trigger string) {
 		designID, trigger,
 	)
 	escapedPrompt := strings.ReplaceAll(prompt, "'", "'\\''")
-	shellCmd := fmt.Sprintf("cd %s && claude --print '%s'", repoRoot, escapedPrompt)
+	shellCmd := fmt.Sprintf("cd '%s' && claude --print '%s'", strings.ReplaceAll(repoRoot, "'", "'\\''"), escapedPrompt)
 
 	windowName := fmt.Sprintf("m-%s", designID)
 	tmuxArgs := []string{"new-window", "-n", windowName, "-t", "main", shellCmd}
