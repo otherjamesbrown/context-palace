@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/otherjamesbrown/context-palace/cxp/internal/client"
 	"github.com/spf13/cobra"
 )
 
@@ -39,10 +41,23 @@ For each trigger, spawns an M session in a tmux window (unless --dry-run).`,
 			interval = 30
 		}
 
-		repoRoot := findRepoRoot()
+		// Resolve repo from registry, falling back to cwd
+		repoRoot, err := client.RepoForProject(cpClient.Config.Project)
+		if err != nil {
+			// Fall back to git repo root or cwd
+			repoRoot = findRepoRoot()
+			fmt.Fprintf(os.Stderr, "[poller] No repo registered for project %q, using %s\n", cpClient.Config.Project, repoRoot)
+			fmt.Fprintf(os.Stderr, "[poller] Run `cxp pipeline setup` in the repo to register it.\n")
+		}
+
+		// Load pipeline config for this repo
+		pipelineCfg, cfgErr := client.LoadPipelineConfig(repoRoot)
+		if cfgErr != nil {
+			pipelineCfg = client.DefaultPipelineConfig()
+		}
 
 		for {
-			runTriggerChecks(ctx, repoRoot, dryRun)
+			runTriggerChecks(ctx, repoRoot, pipelineCfg, dryRun)
 			if once {
 				break
 			}
@@ -62,20 +77,20 @@ func findRepoRoot() string {
 	return cwd
 }
 
-func runTriggerChecks(ctx context.Context, repoRoot string, dryRun bool) {
+func runTriggerChecks(ctx context.Context, repoRoot string, cfg *client.PipelineConfig, dryRun bool) {
 	fmt.Printf("[%s] Polling for triggers...\n", time.Now().Format("15:04:05"))
 
 	// Trigger 1: New design ready
-	triggerNewDesigns(ctx, repoRoot, dryRun)
+	triggerNewDesigns(ctx, repoRoot, cfg, dryRun)
 
 	// Trigger 2: Task needs review
-	triggerTasksNeedingReview(ctx, repoRoot, dryRun)
+	triggerTasksNeedingReview(ctx, repoRoot, cfg, dryRun)
 
 	// Trigger 3: Waiting condition satisfied
-	triggerSatisfiedWaits(ctx, repoRoot, dryRun)
+	triggerSatisfiedWaits(ctx, repoRoot, cfg, dryRun)
 }
 
-func triggerNewDesigns(ctx context.Context, repoRoot string, dryRun bool) {
+func triggerNewDesigns(ctx context.Context, repoRoot string, cfg *client.PipelineConfig, dryRun bool) {
 	designs, err := cpClient.FindNewDesigns(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "  [trigger:new-design] error: %v\n", err)
@@ -97,11 +112,11 @@ func triggerNewDesigns(ctx context.Context, repoRoot string, dryRun bool) {
 			continue
 		}
 
-		spawnM(ctx, repoRoot, d.ID, "new-design")
+		spawnM(ctx, repoRoot, cfg, d.ID, "new-design")
 	}
 }
 
-func triggerTasksNeedingReview(ctx context.Context, repoRoot string, dryRun bool) {
+func triggerTasksNeedingReview(ctx context.Context, repoRoot string, cfg *client.PipelineConfig, dryRun bool) {
 	tasks, err := cpClient.FindTasksNeedingReview(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "  [trigger:needs-review] error: %v\n", err)
@@ -124,11 +139,11 @@ func triggerTasksNeedingReview(ctx context.Context, repoRoot string, dryRun bool
 			continue
 		}
 
-		spawnM(ctx, repoRoot, designID, "needs-review")
+		spawnM(ctx, repoRoot, cfg, designID, "needs-review")
 	}
 }
 
-func triggerSatisfiedWaits(ctx context.Context, repoRoot string, dryRun bool) {
+func triggerSatisfiedWaits(ctx context.Context, repoRoot string, cfg *client.PipelineConfig, dryRun bool) {
 	waits, err := cpClient.FindSatisfiedWaits(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "  [trigger:wait-satisfied] error: %v\n", err)
@@ -145,7 +160,7 @@ func triggerSatisfiedWaits(ctx context.Context, repoRoot string, dryRun bool) {
 			continue
 		}
 
-		spawnM(ctx, repoRoot, w.DesignID, "wait-satisfied")
+		spawnM(ctx, repoRoot, cfg, w.DesignID, "wait-satisfied")
 	}
 }
 
@@ -181,16 +196,33 @@ func findParentDesign(ctx context.Context, taskID string) string {
 }
 
 // spawnM spawns an M session in a tmux window.
-func spawnM(ctx context.Context, repoRoot, designID, trigger string) {
+func spawnM(ctx context.Context, repoRoot string, cfg *client.PipelineConfig, designID, trigger string) {
+	// Resolve playbook path
+	skillsDir := cfg.SkillsDir
+	if skillsDir == "" {
+		skillsDir = "skills"
+	}
+	playbookPath := filepath.Join(skillsDir, "m-playbook.md")
+
+	tmuxSession := cfg.Dispatch.TmuxSession
+	if tmuxSession == "" {
+		tmuxSession = "main"
+	}
+
+	claudeFlags := cfg.Dispatch.ClaudeFlags
+	if claudeFlags == "" {
+		claudeFlags = "--print"
+	}
+
 	prompt := fmt.Sprintf(
-		"You are M. Read your playbook at skills/m-playbook.md. Your pipeline shard is %s. Current trigger: %s.",
-		designID, trigger,
+		"You are M. Read your playbook at %s. Your pipeline shard is %s. Current trigger: %s.",
+		playbookPath, designID, trigger,
 	)
 	escapedPrompt := strings.ReplaceAll(prompt, "'", "'\\''")
-	shellCmd := fmt.Sprintf("cd '%s' && claude --print '%s'", strings.ReplaceAll(repoRoot, "'", "'\\''"), escapedPrompt)
+	shellCmd := fmt.Sprintf("cd '%s' && claude %s '%s'", strings.ReplaceAll(repoRoot, "'", "'\\''"), claudeFlags, escapedPrompt)
 
 	windowName := fmt.Sprintf("m-%s", designID)
-	tmuxArgs := []string{"new-window", "-n", windowName, "-t", "main", shellCmd}
+	tmuxArgs := []string{"new-window", "-n", windowName, "-t", tmuxSession, shellCmd}
 
 	out, err := exec.CommandContext(ctx, "tmux", tmuxArgs...).CombinedOutput()
 	if err != nil {

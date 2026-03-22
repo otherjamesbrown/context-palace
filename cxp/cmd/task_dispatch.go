@@ -103,17 +103,33 @@ var taskDispatchCmd = &cobra.Command{
 			promptBuilder.WriteString(designContext)
 			promptBuilder.WriteString("\n\n")
 		}
+		// Load pipeline config for build/test instructions
+		pCfg, _ := client.LoadPipelineConfig(worktreePath)
+		if pCfg == nil {
+			pCfg = client.DefaultPipelineConfig()
+		}
+
 		promptBuilder.WriteString("## Instructions\n\n")
 		promptBuilder.WriteString("Implement this task following the acceptance criteria above.\n\n")
 		promptBuilder.WriteString("### On completion\n\n")
-		promptBuilder.WriteString("1. Run tests: `go test ./...` and `go vet ./...`\n")
-		promptBuilder.WriteString("2. Build: `go build -o ~/bin/cxp .`\n")
-		promptBuilder.WriteString("3. Append evidence:\n")
+
+		step := 1
+		if len(pCfg.Test) > 0 {
+			promptBuilder.WriteString(fmt.Sprintf("%d. Run tests: `%s`\n", step, strings.Join(pCfg.Test, " && ")))
+			step++
+		}
+		if len(pCfg.Build) > 0 {
+			promptBuilder.WriteString(fmt.Sprintf("%d. Build: `%s`\n", step, strings.Join(pCfg.Build, " && ")))
+			step++
+		}
+		promptBuilder.WriteString(fmt.Sprintf("%d. Append evidence:\n", step))
 		promptBuilder.WriteString("   ```\n")
 		promptBuilder.WriteString("   cxp task evidence " + taskID + " --files \"<files changed>\" --commit <hash> --body \"<verification notes>\"\n")
 		promptBuilder.WriteString("   ```\n")
-		promptBuilder.WriteString("4. Create PR: `cxp task pr create " + taskID + "`\n")
-		promptBuilder.WriteString("5. Mark for review: `cxp shard status " + taskID + " needs-review`\n")
+		step++
+		promptBuilder.WriteString(fmt.Sprintf("%d. Create PR: `cxp task pr create %s`\n", step, taskID))
+		step++
+		promptBuilder.WriteString(fmt.Sprintf("%d. Mark for review: `cxp shard status %s needs-review`\n", step, taskID))
 
 		prompt := promptBuilder.String()
 
