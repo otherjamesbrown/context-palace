@@ -71,7 +71,7 @@ EXAMPLES:
 	SilenceErrors: true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Skip config loading for commands that don't need it
-		if cmd.Name() == "version" || cmd.Name() == "init" {
+		if cmd.Name() == "version" || (cmd.Name() == "init" && cmd.Parent() != nil && cmd.Parent().Name() == "cxp") {
 			return nil
 		}
 

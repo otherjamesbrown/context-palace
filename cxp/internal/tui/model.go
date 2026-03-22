@@ -151,7 +151,7 @@ func (m BrowseModel) loadWorkItems() tea.Cmd {
 			statuses = append(statuses, "closed", "deferred")
 		}
 		results, err := m.client.ListShardsFiltered(ctx, client.ListShardsOpts{
-			Types:  []string{"task", "bug", "design"},
+			Types:  []string{"task", "bug", "design", "outcome"},
 			Status: statuses,
 			Limit:  200,
 		})
