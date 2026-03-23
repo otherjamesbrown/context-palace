@@ -32,7 +32,9 @@ monitoring:
 
 # Review process
 review:
-    wait_for_ci: false                   # no CI on this repo yet
+    ci:
+        mode: ignore                     # no CI on this repo yet
+        wait: false
     strategy: agent                      # spawn our own reviewer
     review_skill: m-review-pr            # skill for the review agent
     review_agent: agent-mycroft          # who reviews

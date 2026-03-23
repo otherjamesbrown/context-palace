@@ -29,23 +29,47 @@ gh pr diff <pr-number> --repo <owner/repo>
 
 ## Step 2: Evaluate CI
 
+Read the CI mode from `.cxp/pipeline.yaml` → `review.ci.mode`:
+
+### mode: ignore
+Skip CI evaluation entirely. Proceed to review.
+
+### mode: all-pass
 ```
 All checks pass?
-  YES → proceed to review evaluation
-  NO  → which checks failed?
-    Lint only       → send back for lint fix (minor)
-    Unit tests      → diagnose: test bug or implementation bug?
-    Build failure   → send back to implementer
-    Proto lint      → may be pre-existing, check main branch
+  YES → proceed to review
+  NO  → request-changes with failure details
 ```
 
-**Check if failures are pre-existing:**
+### mode: pr-only (default)
+Only fail on checks that this PR broke — not pre-existing failures.
+
 ```bash
-# Compare against main branch CI
-gh api repos/<owner/repo>/actions/runs?branch=main&status=completed --jq '.workflow_runs[0].conclusion'
+# Get PR check results
+gh pr checks <pr-number> --repo <owner/repo>
+
+# Get main branch CI status for comparison
+gh api repos/<owner/repo>/actions/runs?branch=main&status=completed&per_page=1 \
+  --jq '.workflow_runs[0].id' | xargs -I{} gh api repos/<owner/repo>/actions/runs/{}/jobs \
+  --jq '.jobs[] | .name + ":" + .conclusion'
 ```
 
-If main is also failing on the same checks, the failures are pre-existing — note this but don't block the PR.
+Compare each failed check against main:
+```
+Check fails on PR AND passes on main? → PR introduced this failure → BLOCK
+Check fails on PR AND fails on main?  → Pre-existing failure → NOTE but don't block
+Check passes on PR?                   → Fine
+```
+
+Record in your review:
+```
+CI: 3/8 checks failed
+  - Lint: FAIL (pre-existing — also fails on main)
+  - Proto Lint: FAIL (pre-existing)
+  - Unit Tests (services/worker): FAIL — NEW failure, caused by this PR
+```
+
+Only new failures block the PR.
 
 ## Step 3: Evaluate Gemini review
 

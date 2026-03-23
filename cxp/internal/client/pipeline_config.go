@@ -61,14 +61,20 @@ type GitHubCfg struct {
 	OwnerRepo string `yaml:"owner_repo"`
 }
 
+// CICfg controls how CI results are evaluated.
+type CICfg struct {
+	Mode string `yaml:"mode,omitempty"` // "pr-only", "all-pass", or "ignore"
+	Wait bool   `yaml:"wait,omitempty"` // wait for CI to complete before reviewing
+}
+
 // ReviewCfg controls how PRs are reviewed.
 type ReviewCfg struct {
-	WaitForCI         bool     `yaml:"wait_for_ci,omitempty"`
-	Strategy          string   `yaml:"strategy,omitempty"`          // "external" or "agent"
+	CI                CICfg    `yaml:"ci,omitempty"`
+	Strategy          string   `yaml:"strategy,omitempty"`           // "external" or "agent"
 	ExternalReviewers []string `yaml:"external_reviewers,omitempty"` // GitHub bot usernames
-	ProcessSkill      string   `yaml:"process_skill,omitempty"`     // skill for processing external reviews
-	ReviewSkill       string   `yaml:"review_skill,omitempty"`      // skill for agent-based reviews
-	ReviewAgent       string   `yaml:"review_agent,omitempty"`      // who does agent reviews
+	ProcessSkill      string   `yaml:"process_skill,omitempty"`      // skill for processing external reviews
+	ReviewSkill       string   `yaml:"review_skill,omitempty"`       // skill for agent-based reviews
+	ReviewAgent       string   `yaml:"review_agent,omitempty"`       // who does agent reviews
 }
 
 // MonitoringCfg controls health monitoring for dispatched agents.
