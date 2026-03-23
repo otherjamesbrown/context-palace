@@ -329,6 +329,59 @@ var shardPipelineReviewCmd = &cobra.Command{
 	},
 }
 
+var shardPipelineDecomposeCmd = &cobra.Command{
+	Use:   "decompose <design-id>",
+	Short: "Record Phase 2 decomposition verdict",
+	Args:  cobra.ExactArgs(1),
+	Example: `  cxp shard pipeline decompose pf-design-123 --verdict pass --body "Tasks are well-defined."
+  cxp shard pipeline decompose pf-design-123 --verdict fail --body-file decompose-notes.md`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		designID := args[0]
+
+		verdict, _ := cmd.Flags().GetString("verdict")
+		body, _ := cmd.Flags().GetString("body")
+		bodyFile, _ := cmd.Flags().GetString("body-file")
+
+		// Validate verdict
+		if verdict == "" {
+			return fmt.Errorf("--verdict is required")
+		}
+		if verdict != "pass" && verdict != "fail" {
+			return fmt.Errorf("--verdict must be 'pass' or 'fail', got %q", verdict)
+		}
+
+		// Resolve body content
+		content, err := resolveBody(body, bodyFile)
+		if err != nil {
+			return err
+		}
+
+		result, err := cpClient.PipelineDecompose(ctx, designID, verdict, content)
+		if err != nil {
+			return err
+		}
+
+		if outputFormat == "json" {
+			s, _ := client.FormatJSON(result)
+			fmt.Println(s)
+			return nil
+		}
+
+		phaseTransition := result.Phase
+		if result.Verdict == "pass" {
+			phaseTransition = "decompose → implement"
+		}
+		fmt.Printf("Recorded Phase 2 decomposition for %s\n", result.DesignID)
+		fmt.Printf("  Decompose shard: %s\n", result.DecomposeShardID)
+		fmt.Printf("  Round:           %d\n", result.Round)
+		fmt.Printf("  Verdict:         %s\n", result.Verdict)
+		fmt.Printf("  Tasks:           %d\n", result.TaskCount)
+		fmt.Printf("  Phase:           %s\n", phaseTransition)
+		return nil
+	},
+}
+
 func init() {
 	// pipeline update flags
 	shardPipelineUpdateCmd.Flags().String("phase", "", "Pipeline phase (design, decompose, implement, review, deploy, done)")
@@ -344,6 +397,12 @@ func init() {
 	_ = shardPipelineReviewCmd.MarkFlagRequired("verdict")
 	_ = shardPipelineReviewCmd.MarkFlagRequired("readiness")
 
+	// pipeline decompose flags
+	shardPipelineDecomposeCmd.Flags().String("verdict", "", "Decomposition verdict: 'pass' or 'fail' (required)")
+	shardPipelineDecomposeCmd.Flags().String("body", "", "Findings text")
+	shardPipelineDecomposeCmd.Flags().String("body-file", "", "Read findings from file")
+	_ = shardPipelineDecomposeCmd.MarkFlagRequired("verdict")
+
 	// pipeline lock flags
 	shardPipelineLockCmd.Flags().String("session", "", "Session ID for the lock (defaults to agent name + timestamp)")
 
@@ -355,6 +414,7 @@ func init() {
 	shardPipelineCmd.AddCommand(shardPipelineUnlockCmd)
 	shardPipelineCmd.AddCommand(shardPipelineLockCheckCmd)
 	shardPipelineCmd.AddCommand(shardPipelineReviewCmd)
+	shardPipelineCmd.AddCommand(shardPipelineDecomposeCmd)
 
 	shardCmd.AddCommand(shardPipelineCmd)
 }

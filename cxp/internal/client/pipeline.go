@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -49,6 +50,7 @@ type PipelineState struct {
 	CumulativeTokens int                 `json:"cumulative_tokens"`
 	IterationCounts  map[string]int      `json:"iteration_counts"`
 	Review           *ReviewState        `json:"review,omitempty"`
+	Decompose        *DecomposeState     `json:"decompose,omitempty"`
 }
 
 // DefaultPipelineState returns a new PipelineState with default values
@@ -267,6 +269,33 @@ func (c *Client) PipelineLockCheck(ctx context.Context, id string) (string, *Pip
 	return "stale", state, nil
 }
 
+// DecomposeHistoryEntry records a single decomposition round
+type DecomposeHistoryEntry struct {
+	Round     int    `json:"round"`
+	Verdict   string `json:"verdict"`
+	ShardID   string `json:"shard_id"`
+	TaskCount int    `json:"task_count"`
+	Timestamp string `json:"timestamp"`
+}
+
+// DecomposeState tracks cumulative decomposition history on a pipeline
+type DecomposeState struct {
+	Round              int                      `json:"round"`
+	LastVerdict        string                   `json:"last_verdict"`
+	LastDecomposeShard string                   `json:"last_decompose_shard"`
+	History            []DecomposeHistoryEntry  `json:"history"`
+}
+
+// PipelineDecomposeResult holds the outcome of a pipeline decompose operation
+type PipelineDecomposeResult struct {
+	DesignID         string `json:"design_id"`
+	DecomposeShardID string `json:"decompose_shard_id"`
+	Round            int    `json:"round"`
+	Verdict          string `json:"verdict"`
+	TaskCount        int    `json:"task_count"`
+	Phase            string `json:"phase"`
+}
+
 // PipelineReviewResult holds the outcome of a pipeline review operation
 type PipelineReviewResult struct {
 	DesignID      string `json:"design_id"`
@@ -371,3 +400,175 @@ func (c *Client) PipelineReview(ctx context.Context, designID, verdict string, r
 		Phase:         resultPhase,
 	}, nil
 }
+
+// PipelineDecompose records a Phase 2 decomposition verdict, creates an audit
+// shard, updates pipeline metadata, and optionally advances the phase to "implement".
+func (c *Client) PipelineDecompose(ctx context.Context, designID, verdict string, body string) (*PipelineDecomposeResult, error) {
+	// 1. Get pipeline state — verify phase is "decompose"
+	state, err := c.PipelineGet(ctx, designID)
+	if err != nil {
+		return nil, err
+	}
+	if state.Phase != "decompose" {
+		return nil, fmt.Errorf("pipeline phase is %q, expected 'decompose' for decomposition gate", state.Phase)
+	}
+
+	// 2. Compute round
+	round := 1
+	if state.Decompose != nil {
+		round = state.Decompose.Round + 1
+	}
+
+	// 3. Get child tasks
+	edges, err := c.GetShardEdges(ctx, designID, "incoming", []string{"child-of"})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get child edges: %v", err)
+	}
+	var taskEdges []EdgeInfo
+	for _, e := range edges {
+		if e.Type == "task" {
+			taskEdges = append(taskEdges, e)
+		}
+	}
+
+	taskCount := len(taskEdges)
+
+	// 4. If pass, run validations
+	if verdict == "pass" {
+		// a. At least 1 task
+		if taskCount == 0 {
+			return nil, fmt.Errorf("cannot pass decomposition: no child tasks found for design %s", designID)
+		}
+
+		// b. Each task has substantive content (>50 chars)
+		for _, te := range taskEdges {
+			shard, err := c.GetShard(ctx, te.ShardID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get task shard %s: %v", te.ShardID, err)
+			}
+			if len(shard.Content) <= 50 {
+				return nil, fmt.Errorf("cannot pass decomposition: task %s (%s) has insufficient content (%d chars, need >50)", te.ShardID, shard.Title, len(shard.Content))
+			}
+		}
+
+		// c. Validate acyclic
+		_, depsErr := c.GetTaskDeps(ctx, designID)
+		if depsErr != nil {
+			if strings.Contains(depsErr.Error(), "circular") {
+				return nil, fmt.Errorf("cannot pass decomposition: circular dependency detected: %v", depsErr)
+			}
+			// Non-circular errors are non-fatal for the gate
+		}
+
+		// d. Auto-fix: add any tasks not in state.TaskShards
+		existingTasks := make(map[string]bool)
+		for _, ts := range state.TaskShards {
+			existingTasks[ts] = true
+		}
+		for _, te := range taskEdges {
+			if !existingTasks[te.ShardID] {
+				addTask := te.ShardID
+				_, err := c.PipelineUpdate(ctx, designID, nil, nil, &addTask, nil)
+				if err != nil {
+					return nil, fmt.Errorf("failed to auto-add task %s to pipeline: %v", te.ShardID, err)
+				}
+			}
+		}
+	}
+
+	// 5. Build task list table for audit shard content
+	now := time.Now().UTC()
+	timestamp := now.Format(time.RFC3339)
+	verdictUpper := "FAIL"
+	if verdict == "pass" {
+		verdictUpper = "PASS"
+	}
+
+	var taskRows string
+	for i, te := range taskEdges {
+		shard, err := c.GetShard(ctx, te.ShardID)
+		if err != nil {
+			taskRows += fmt.Sprintf("| %d | %s | (error loading) | — |\n", i+1, te.ShardID)
+			continue
+		}
+		// Get blocked-by deps
+		depEdges, _ := c.GetShardEdges(ctx, te.ShardID, "outgoing", []string{"blocked-by"})
+		deps := "—"
+		if len(depEdges) > 0 {
+			depIDs := make([]string, len(depEdges))
+			for j, d := range depEdges {
+				depIDs[j] = d.ShardID
+			}
+			deps = strings.Join(depIDs, ", ")
+		}
+		taskRows += fmt.Sprintf("| %d | %s | %s | %s |\n", i+1, te.ShardID, shard.Title, deps)
+	}
+
+	content := fmt.Sprintf("# Phase 2 Decomposition — Round %d\n\n**Design:** %s\n**Reviewer:** %s\n**Timestamp:** %s\n**Verdict:** %s\n**Tasks:** %d\n\n## Task List\n\n| # | ID | Title | Blocked by |\n|---|-----|-------|------------|\n%s\n## Findings\n\n%s",
+		round, designID, c.Config.Agent, timestamp, verdictUpper, taskCount, taskRows, body)
+
+	// 6. Create decomposition audit shard
+	title := fmt.Sprintf("Phase 2 Decomposition — Round %d — %s", round, verdictUpper)
+	meta, _ := json.Marshal(map[string]any{
+		"design_id":  designID,
+		"round":      round,
+		"verdict":    verdict,
+		"task_count": taskCount,
+	})
+	decomposeID, err := c.CreateShardWithMetadata(ctx, title, content, "review", nil, []string{"phase2-decompose"}, json.RawMessage(meta))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create decompose shard: %v", err)
+	}
+
+	// 7. Create child-of edge from decompose shard to design shard
+	if err := c.CreateEdgeSimple(ctx, decomposeID, designID, "child-of"); err != nil {
+		return nil, fmt.Errorf("failed to create edge: %v", err)
+	}
+
+	// 8. Build DecomposeState and write to pipeline metadata
+	decomposeState := &DecomposeState{
+		Round:              round,
+		LastVerdict:        verdict,
+		LastDecomposeShard: decomposeID,
+		History: append(func() []DecomposeHistoryEntry {
+			if state.Decompose != nil {
+				return state.Decompose.History
+			}
+			return nil
+		}(), DecomposeHistoryEntry{
+			Round:     round,
+			Verdict:   verdict,
+			ShardID:   decomposeID,
+			TaskCount: taskCount,
+			Timestamp: timestamp,
+		}),
+	}
+	decomposeJSON, err := json.Marshal(decomposeState)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal decompose state: %v", err)
+	}
+	if _, err := c.SetMetadataPath(ctx, designID, []string{"pipeline", "decompose"}, decomposeJSON); err != nil {
+		return nil, fmt.Errorf("failed to update decompose metadata: %v", err)
+	}
+
+	// 9. If pass, advance phase to "implement"
+	resultPhase := state.Phase
+	if verdict == "pass" {
+		implement := "implement"
+		phaseJSON, _ := json.Marshal(implement)
+		if _, err := c.SetMetadataPath(ctx, designID, []string{"pipeline", "phase"}, phaseJSON); err != nil {
+			return nil, fmt.Errorf("failed to advance phase: %v", err)
+		}
+		resultPhase = "implement"
+	}
+
+	return &PipelineDecomposeResult{
+		DesignID:         designID,
+		DecomposeShardID: decomposeID,
+		Round:            round,
+		Verdict:          verdict,
+		TaskCount:        taskCount,
+		Phase:            resultPhase,
+	}, nil
+}
+

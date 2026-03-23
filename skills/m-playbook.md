@@ -82,7 +82,6 @@ Design mentions:
 ### Steps
 
 1. **Pass 1 — Structure**: Hand design to domain agent for task tree.
-   - Use `cxp task dispatch` when available, or describe the decomposition task.
    - Agent produces: task titles, scope summaries, dependency edges, ordering.
 
 2. **Validate structure** against design:
@@ -104,12 +103,22 @@ Design mentions:
    # blocked-by edges are set in task create --blocked-by <predecessor-id>
    ```
 
-5. Update pipeline:
+5. **Record decomposition verdict and advance phase:**
    ```bash
-   cxp shard pipeline update <id> --phase implement --add-task <task-id>  # for each task
+   cxp shard pipeline decompose <design-id> --verdict pass --body "<rationale and findings>"
    ```
+   This command:
+   - Validates all tasks are linked, have content, and deps are acyclic
+   - Creates a decomposition audit sub-shard (linked to design)
+   - Updates pipeline metadata with structured verdict and round number
+   - If pass: automatically advances phase to `implement`
+   - If fail: stays in `decompose` (fix issues and re-run)
+
+   If validation fails, you'll get a specific error (e.g. "task pf-xxx has empty content", "circular dependency detected"). Fix the issue and retry.
 
 6. Exit. The poller will pick up Phase 3.
+
+**Do NOT manually update the phase with `cxp shard pipeline update --phase implement`.** The decompose command handles validation and phase advance together.
 
 ---
 
@@ -315,6 +324,7 @@ If you crash without unlocking, the 5-minute TTL ensures recovery.
 | Read pipeline state | `cxp shard pipeline show <id>` |
 | Update phase | `cxp shard pipeline update <id> --phase <phase>` |
 | Record Phase 1 review | `cxp shard pipeline review <id> --verdict pass\|fail --readiness N --body "..."` |
+| Record Phase 2 decompose | `cxp shard pipeline decompose <id> --verdict pass\|fail --body "..."` |
 | Lock pipeline | `cxp shard pipeline lock <id>` |
 | Unlock pipeline | `cxp shard pipeline unlock <id>` |
 | View task deps | `cxp task deps <design-id>` |
