@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -58,6 +59,7 @@ For each trigger, spawns an M session in a tmux window (unless --dry-run).`,
 
 		for {
 			runTriggerChecks(ctx, repoRoot, pipelineCfg, dryRun)
+			runHealthChecks(ctx, repoRoot, pipelineCfg, dryRun)
 			if once {
 				break
 			}
@@ -239,6 +241,156 @@ func spawnM(ctx context.Context, repoRoot string, cfg *client.PipelineConfig, de
 	}
 
 	fmt.Printf("  [spawn] M session started: window=%s trigger=%s\n", windowName, trigger)
+}
+
+// runHealthChecks detects stalled and crashed agents, then takes actions
+// defined in the pipeline monitoring config.
+func runHealthChecks(ctx context.Context, repoRoot string, cfg *client.PipelineConfig, dryRun bool) {
+	mon := cfg.Monitoring
+	if mon.StallTimeout == "" && !mon.CrashCheck {
+		return // monitoring disabled
+	}
+
+	stallTimeout, _ := time.ParseDuration(mon.StallTimeout)
+	if stallTimeout == 0 {
+		stallTimeout = 30 * time.Minute
+	}
+
+	tmuxSession := cfg.Dispatch.TmuxSession
+	if tmuxSession == "" {
+		tmuxSession = "main"
+	}
+
+	// Find all in_progress tasks
+	tasks, err := cpClient.FindInProgressTasks(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  [health] error finding tasks: %v\n", err)
+		return
+	}
+
+	if len(tasks) == 0 {
+		return
+	}
+
+	fmt.Printf("  [health] checking %d in-progress tasks\n", len(tasks))
+
+	for _, task := range tasks {
+		// Check for crash: tmux window gone?
+		if mon.CrashCheck {
+			windowExists := checkTmuxWindow(tmuxSession, task.ID)
+			if !windowExists {
+				handleCrash(ctx, task, mon, repoRoot, cfg, dryRun)
+				continue
+			}
+		}
+
+		// Check for stall: no update for > stallTimeout?
+		if time.Since(task.UpdatedAt) > stallTimeout {
+			handleStall(ctx, task, mon, repoRoot, cfg, tmuxSession, dryRun)
+		}
+	}
+}
+
+// checkTmuxWindow returns true if a tmux window containing taskID exists in the session.
+func checkTmuxWindow(session, taskID string) bool {
+	out, err := exec.Command("tmux", "list-windows", "-t", session).Output()
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(out), taskID)
+}
+
+// handleCrash handles a crashed agent (tmux window gone) based on monitoring config.
+func handleCrash(ctx context.Context, task client.ShardSummary, mon client.MonitoringCfg, repoRoot string, cfg *client.PipelineConfig, dryRun bool) {
+	retryCount := getRetryCount(ctx, task.ID)
+
+	if mon.MaxRetries > 0 && retryCount >= mon.MaxRetries {
+		if dryRun {
+			fmt.Printf("  [health:crash] %s — max retries (%d) exceeded, would escalate\n", task.ID, mon.MaxRetries)
+			return
+		}
+		fmt.Printf("  [health:crash] %s — max retries (%d) exceeded, escalating\n", task.ID, mon.MaxRetries)
+		action := mon.Actions.OnMaxRetries
+		if action == "escalate" || action == "" {
+			_ = cpClient.AppendShardContent(ctx, task.ID, fmt.Sprintf("\n\n## Health Check — Crash\nMax retries (%d) exceeded. Escalating.", mon.MaxRetries))
+			_ = exec.Command("cxp", "shard", "label", "add", task.ID, "blocked").Run()
+		}
+		return
+	}
+
+	action := mon.Actions.OnCrash
+	if dryRun {
+		fmt.Printf("  [health:crash] %s — window gone, retry %d/%d, would %s\n", task.ID, retryCount+1, mon.MaxRetries, action)
+		return
+	}
+
+	fmt.Printf("  [health:crash] %s — window gone, retry %d/%d, action: %s\n", task.ID, retryCount+1, mon.MaxRetries, action)
+
+	switch {
+	case action == "redispatch" || action == "":
+		_ = cpClient.AppendShardContent(ctx, task.ID, fmt.Sprintf("\n\n## Health Check — Crash detected\nRetry %d/%d. Re-dispatching.", retryCount+1, mon.MaxRetries))
+		setRetryCount(ctx, task.ID, retryCount+1)
+		_ = exec.Command("cxp", "shard", "status", task.ID, "open").Run()
+		_ = exec.Command("cxp", "task", "worktree", "remove", task.ID).Run()
+		_ = exec.Command("cxp", "task", "dispatch", task.ID).Run()
+	case strings.HasPrefix(action, "skill:"):
+		_ = cpClient.AppendShardContent(ctx, task.ID, fmt.Sprintf("\n\n## Health Check — Crash detected\nRetry %d/%d. Spawning skill %s.", retryCount+1, mon.MaxRetries, action))
+		setRetryCount(ctx, task.ID, retryCount+1)
+		spawnM(ctx, repoRoot, cfg, task.ID, "health-crash")
+	case action == "escalate":
+		_ = cpClient.AppendShardContent(ctx, task.ID, "\n\n## Health Check — Crash detected\nEscalating.")
+		_ = exec.Command("cxp", "shard", "label", "add", task.ID, "blocked").Run()
+	}
+}
+
+// handleStall handles a stalled agent (no updates for > stallTimeout).
+func handleStall(ctx context.Context, task client.ShardSummary, mon client.MonitoringCfg, repoRoot string, cfg *client.PipelineConfig, tmuxSession string, dryRun bool) {
+	action := mon.Actions.OnStall
+	if dryRun {
+		fmt.Printf("  [health:stall] %s — no progress for %s, would %s\n", task.ID, mon.StallTimeout, action)
+		return
+	}
+
+	fmt.Printf("  [health:stall] %s — no progress for %s, action: %s\n", task.ID, mon.StallTimeout, action)
+
+	switch {
+	case strings.HasPrefix(action, "skill:"):
+		_ = cpClient.AppendShardContent(ctx, task.ID, fmt.Sprintf("\n\n## Health Check — Stall detected\nNo progress for %s. Spawning skill %s.", mon.StallTimeout, action))
+		spawnM(ctx, repoRoot, cfg, task.ID, "health-stall")
+	case action == "escalate":
+		_ = cpClient.AppendShardContent(ctx, task.ID, fmt.Sprintf("\n\n## Health Check — Stall detected\nNo progress for %s. Escalating.", mon.StallTimeout))
+		_ = exec.Command("cxp", "shard", "label", "add", task.ID, "blocked").Run()
+	case action == "redispatch":
+		retryCount := getRetryCount(ctx, task.ID)
+		_ = cpClient.AppendShardContent(ctx, task.ID, fmt.Sprintf("\n\n## Health Check — Stall detected\nNo progress for %s. Re-dispatching (retry %d/%d).", mon.StallTimeout, retryCount+1, mon.MaxRetries))
+		setRetryCount(ctx, task.ID, retryCount+1)
+		_ = exec.Command("cxp", "shard", "status", task.ID, "open").Run()
+		_ = exec.Command("cxp", "task", "worktree", "remove", task.ID).Run()
+		_ = exec.Command("cxp", "task", "dispatch", task.ID).Run()
+	}
+}
+
+// getRetryCount reads the dispatch_retries count from task shard metadata.
+func getRetryCount(ctx context.Context, taskID string) int {
+	shard, err := cpClient.GetShard(ctx, taskID)
+	if err != nil {
+		return 0
+	}
+	if shard.Metadata == nil {
+		return 0
+	}
+	var meta map[string]interface{}
+	if err := json.Unmarshal(shard.Metadata, &meta); err != nil {
+		return 0
+	}
+	count, _ := meta["dispatch_retries"].(float64)
+	return int(count)
+}
+
+// setRetryCount writes the dispatch_retries count to task shard metadata.
+func setRetryCount(ctx context.Context, taskID string, count int) {
+	countJSON, _ := json.Marshal(count)
+	_, _ = cpClient.SetMetadataPath(ctx, taskID, []string{"dispatch_retries"}, countJSON)
 }
 
 func init() {

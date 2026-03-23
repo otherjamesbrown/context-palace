@@ -37,6 +37,7 @@ type PipelineConfig struct {
 	CompletionSteps []string            `yaml:"completion_steps,omitempty"`
 	Agents          map[string]AgentCfg `yaml:"agents,omitempty"`
 	Dispatch        DispatchCfg         `yaml:"dispatch,omitempty"`
+	Monitoring      MonitoringCfg       `yaml:"monitoring,omitempty"`
 	GitHub          GitHubCfg           `yaml:"github,omitempty"`
 	SkillsDir       string              `yaml:"skills_dir,omitempty"`
 	Phases          []PhaseConfig       `yaml:"phases,omitempty"`
@@ -59,6 +60,22 @@ type GitHubCfg struct {
 	OwnerRepo string `yaml:"owner_repo"`
 }
 
+// MonitoringCfg controls health monitoring for dispatched agents.
+type MonitoringCfg struct {
+	StallTimeout string            `yaml:"stall_timeout,omitempty"` // e.g. "30m"
+	CrashCheck   bool              `yaml:"crash_check,omitempty"`
+	MaxRetries   int               `yaml:"max_retries,omitempty"`
+	Cooldown     string            `yaml:"cooldown,omitempty"` // e.g. "5m"
+	Actions      MonitoringActions `yaml:"actions,omitempty"`
+}
+
+// MonitoringActions defines what to do for each health event.
+type MonitoringActions struct {
+	OnStall      string `yaml:"on_stall,omitempty"`       // e.g. "skill:m-stall-check"
+	OnCrash      string `yaml:"on_crash,omitempty"`       // e.g. "redispatch"
+	OnMaxRetries string `yaml:"on_max_retries,omitempty"` // e.g. "escalate"
+}
+
 // RepoRegistry maps project names to local repository paths.
 type RepoRegistry struct {
 	Repos map[string]RepoEntry `yaml:"repos"`
@@ -77,6 +94,17 @@ func DefaultPipelineConfig() *PipelineConfig {
 			MaxConcurrent: 3,
 			TmuxSession:   "main",
 			ClaudeFlags:   "--print",
+		},
+		Monitoring: MonitoringCfg{
+			StallTimeout: "30m",
+			CrashCheck:   true,
+			MaxRetries:   3,
+			Cooldown:     "5m",
+			Actions: MonitoringActions{
+				OnStall:      "skill:m-stall-check",
+				OnCrash:      "redispatch",
+				OnMaxRetries: "escalate",
+			},
 		},
 		SkillsDir: "skills",
 	}
@@ -149,6 +177,7 @@ func MergePipelineConfig(base, override *PipelineConfig) *PipelineConfig {
 	out.CompletionSteps = copyStrings(base.CompletionSteps)
 	out.Agents = copyAgents(base.Agents)
 	out.Dispatch = base.Dispatch
+	out.Monitoring = base.Monitoring
 	out.GitHub = base.GitHub
 	out.SkillsDir = base.SkillsDir
 	out.Phases = copyPhases(base.Phases)
@@ -192,6 +221,29 @@ func MergePipelineConfig(base, override *PipelineConfig) *PipelineConfig {
 	}
 	if override.SkillsDir != "" {
 		out.SkillsDir = override.SkillsDir
+	}
+
+	// Monitoring scalars
+	if override.Monitoring.StallTimeout != "" {
+		out.Monitoring.StallTimeout = override.Monitoring.StallTimeout
+	}
+	if override.Monitoring.CrashCheck {
+		out.Monitoring.CrashCheck = true
+	}
+	if override.Monitoring.MaxRetries != 0 {
+		out.Monitoring.MaxRetries = override.Monitoring.MaxRetries
+	}
+	if override.Monitoring.Cooldown != "" {
+		out.Monitoring.Cooldown = override.Monitoring.Cooldown
+	}
+	if override.Monitoring.Actions.OnStall != "" {
+		out.Monitoring.Actions.OnStall = override.Monitoring.Actions.OnStall
+	}
+	if override.Monitoring.Actions.OnCrash != "" {
+		out.Monitoring.Actions.OnCrash = override.Monitoring.Actions.OnCrash
+	}
+	if override.Monitoring.Actions.OnMaxRetries != "" {
+		out.Monitoring.Actions.OnMaxRetries = override.Monitoring.Actions.OnMaxRetries
 	}
 
 	return out

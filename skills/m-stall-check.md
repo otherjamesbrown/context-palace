@@ -1,75 +1,124 @@
-# M Skill: Stall Diagnosis
+# M Skill: Agent Health Check
 
-You are M, diagnosing a stalled task.
+You are M, diagnosing a task that may be stalled, crashed, or rate-limited.
 
 ## Input
-- Task shard ID (in_progress, no progress for >30 minutes)
 
-## Steps
+- Task shard ID
+- Trigger reason: `stall`, `crash`, or `retry-exhausted`
+- Retry count (how many times this task has been re-dispatched)
 
-### 1. Gather context
+## Step 1: Determine status
+
 ```bash
-cxp task get <task-id>
-cxp shard show <task-id>
-```
-Note: updated_at, any progress notes, evidence appended.
-
-### 2. Check tmux
-Is the agent session still running?
-```bash
-tmux list-windows -t main | grep <task-id>
+cxp shard show <task-id> -o json
 ```
 
-### 3. Diagnose
+Check:
+- `status` — should be `in_progress`
+- `updated_at` — when was the last update?
 
-**Agent crashed (no tmux window)**
-→ Re-dispatch:
+Check tmux:
 ```bash
-cxp shard status <task-id> ready
-cxp task dispatch <task-id>
+tmux list-windows -t <tmux-session> | grep <task-id>
 ```
 
-**Agent running but no progress**
-Check iteration count (if available from shard content).
+## Step 2: Diagnose
 
-| Iterations | Action |
-|-----------|--------|
-| <= 5 | Leave it. Exit. Check again next cycle. |
-| 6-10 | Diagnose root cause (see below) |
-| > 10 | Escalate to James |
+### Agent crashed (tmux window gone, task still in_progress)
 
-### 4. Root cause analysis (6-10 iterations)
+The agent session exited — could be rate limit, OOM, context overflow, or bug.
 
-Read the task shard content and any progress notes. Determine:
-
-**Scoping problem** — task is too large or crosses subsystems
-→ Back to decomposition:
+**If retry count < max_retries:**
 ```bash
-cxp shard append <task-id> --body "Stall diagnosis: task scope too broad. Needs re-decomposition."
+# Reset and re-dispatch
+cxp shard status <task-id> open
+cxp task worktree remove <task-id>
+# Wait for cooldown (handled by poller)
+# Poller will re-dispatch on next cycle
+```
+
+Append to shard:
+```bash
+cxp shard append <task-id> --body "## Health Check — Crash detected
+Agent session exited. Retry #<N>. Re-dispatching after cooldown."
+```
+
+**If retry count >= max_retries:**
+```bash
+cxp shard append <task-id> --body "## Health Check — Max retries exceeded
+Agent crashed <N> times. Escalating to James.
+Last status: <status>
+Last update: <updated_at>"
 cxp shard label add <task-id> blocked
 ```
 
-**Missing information** — agent needs a decision or clarification
-→ Surface the question:
+### Agent stalled (tmux window exists, no progress for > stall_timeout)
+
+The agent is running but not making progress — could be stuck in a loop, waiting for input, or hitting repeated failures.
+
+**Check the tmux pane for clues:**
 ```bash
-cxp shard append <task-id> --body "Stall diagnosis: agent blocked on: <question>"
+tmux capture-pane -t <session>:<window> -p | tail -20
+```
+
+Look for:
+- Rate limit messages → wait for cooldown, agent should recover
+- Error loops → likely a code issue, needs re-scoping
+- "thinking" for > 5 min → might be a complex problem, give it more time
+- Idle prompt → agent finished but didn't mark needs-review
+
+**If idle prompt (agent finished but forgot to update status):**
+```bash
+# Check if there's evidence of completion in the shard
+cxp shard show <task-id> -o json
+# If evidence exists, mark it done
+cxp shard status <task-id> needs-review
+```
+
+**If stuck in error loop (> 5 iterations with no progress):**
+```bash
+cxp shard append <task-id> --body "## Health Check — Stall detected
+Agent stuck after <N> iterations. Possible causes:
+- <diagnosis from tmux output>
+
+Action: re-scoping or manual intervention needed."
 cxp shard label add <task-id> blocked
 ```
 
-**Technical limitation** — hitting model limits or API issues
-→ Note for James:
+**If rate limited:**
 ```bash
-cxp shard append <task-id> --body "Stall diagnosis: technical limitation. <details>"
-cxp shard label add <task-id> blocked
+cxp shard append <task-id> --body "## Health Check — Rate limited
+Agent hit rate limits. Will recover on next cycle."
+# No action needed — agent will resume when limits clear
 ```
 
-### 5. Escalation (>10 iterations)
+### Retry exhausted (max retries hit)
+
 ```bash
-cxp shard append <task-id> --body "## Escalation
-Task stalled for >10 iterations.
-Agent: <agent>
-Last progress: <timestamp>
-Diagnosis: <summary>
+cxp shard append <task-id> --body "## Health Check — Escalation
+Task failed after <max_retries> dispatch attempts.
+Design: <design-id>
+Task: <task-title>
+
+Possible causes:
+1. Task scope too large for single session
+2. Missing information in task spec
+3. Codebase issue blocking implementation
+
 Action needed: James to review and re-scope or unblock."
 cxp shard label add <task-id> blocked
+```
+
+## Step 3: Record
+
+Always append health check results to the task shard. Every check should be visible in the audit trail, even if no action is taken.
+
+Format:
+```bash
+cxp shard append <task-id> --body "## Health Check — <timestamp>
+Trigger: <stall|crash|retry-exhausted>
+Retry: <N>/<max>
+Diagnosis: <what was found>
+Action: <what was done>"
 ```

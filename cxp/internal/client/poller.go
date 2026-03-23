@@ -4,15 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 // ShardSummary is a lightweight shard representation used by poller queries.
 type ShardSummary struct {
-	ID       string          `json:"id"`
-	Title    string          `json:"title"`
-	Type     string          `json:"type"`
-	Status   string          `json:"status"`
-	Metadata json.RawMessage `json:"metadata,omitempty"`
+	ID        string          `json:"id"`
+	Title     string          `json:"title"`
+	Type      string          `json:"type"`
+	Status    string          `json:"status"`
+	UpdatedAt time.Time       `json:"updated_at,omitempty"`
+	Metadata  json.RawMessage `json:"metadata,omitempty"`
 }
 
 // PipelineWait represents a design whose waiting_for condition may be satisfied.
@@ -180,4 +182,37 @@ func (c *Client) FindSatisfiedWaits(ctx context.Context) ([]PipelineWait, error)
 	}
 
 	return results, nil
+}
+
+// FindInProgressTasks returns all task shards currently in_progress,
+// ordered by least recently updated first (most likely stalled).
+func (c *Client) FindInProgressTasks(ctx context.Context) ([]ShardSummary, error) {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(ctx)
+
+	rows, err := conn.Query(ctx, `
+		SELECT id, title, type, status, updated_at, metadata
+		FROM shards
+		WHERE project = $1
+			AND type = 'task'
+			AND status = 'in_progress'
+		ORDER BY updated_at ASC
+	`, c.Config.Project)
+	if err != nil {
+		return nil, fmt.Errorf("FindInProgressTasks: %w", err)
+	}
+	defer rows.Close()
+
+	var results []ShardSummary
+	for rows.Next() {
+		var s ShardSummary
+		if err := rows.Scan(&s.ID, &s.Title, &s.Type, &s.Status, &s.UpdatedAt, &s.Metadata); err != nil {
+			return nil, fmt.Errorf("FindInProgressTasks scan: %w", err)
+		}
+		results = append(results, s)
+	}
+	return results, rows.Err()
 }

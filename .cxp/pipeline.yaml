@@ -18,6 +18,17 @@ agents:
 dispatch:
     max_concurrent: 3
     tmux_session: main
+    claude_flags: "--dangerously-skip-permissions"
+
+monitoring:
+    stall_timeout: 30m
+    crash_check: true
+    max_retries: 3
+    cooldown: 5m
+    actions:
+        on_stall: skill:m-stall-check
+        on_crash: redispatch
+        on_max_retries: escalate
 github:
     owner_repo: otherjamesbrown/context-palace
 skills_dir: skills
