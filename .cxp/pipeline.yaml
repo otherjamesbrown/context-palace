@@ -69,3 +69,7 @@ phases:
       model: haiku
 
     - name: done
+      gates:
+          - name: retrospective
+            skill: m-retrospective
+            model: haiku
