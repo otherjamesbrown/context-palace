@@ -160,11 +160,23 @@ var taskDispatchCmd = &cobra.Command{
 			claudeFlags = pCfg.Dispatch.ClaudeFlags
 		}
 
-		shellCmd := fmt.Sprintf("cd '%s' && claude %s \"$(cat '%s')\" ; rm -f '%s'",
+		// Add model flag if configured
+		if pCfg != nil {
+			model := pCfg.Dispatch.ModelFor("implementation")
+			if model != "" {
+				claudeFlags += " --model " + model
+			}
+		}
+
+		// Post-completion handler: cxp task complete runs after agent exits
+		completeCmd := fmt.Sprintf("cxp task complete '%s'", strings.ReplaceAll(taskID, "'", "'\\''"))
+
+		shellCmd := fmt.Sprintf("cd '%s' && claude %s \"$(cat '%s')\" ; rm -f '%s' ; %s",
 			strings.ReplaceAll(worktreePath, "'", "'\\''"),
 			claudeFlags,
 			strings.ReplaceAll(promptPath, "'", "'\\''"),
-			strings.ReplaceAll(promptPath, "'", "'\\''"))
+			strings.ReplaceAll(promptPath, "'", "'\\''"),
+			completeCmd)
 		tmuxArgs := []string{"new-window", "-n", taskID, "-t", tmuxSession, shellCmd}
 
 		// Dry-run: print everything and exit

@@ -19,6 +19,13 @@ dispatch:
     max_concurrent: 3
     tmux_session: main
     claude_flags: "--dangerously-skip-permissions"
+    models:
+        default: sonnet
+        implementation: sonnet
+        review: haiku
+        decomposition: sonnet
+        integration-test: sonnet
+        readiness-check: haiku
 
 monitoring:
     stall_timeout: 30m

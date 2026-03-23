@@ -51,9 +51,24 @@ type AgentCfg struct {
 
 // DispatchCfg controls how work is dispatched to agents.
 type DispatchCfg struct {
-	MaxConcurrent int    `yaml:"max_concurrent,omitempty"`
-	TmuxSession   string `yaml:"tmux_session,omitempty"`
-	ClaudeFlags   string `yaml:"claude_flags,omitempty"`
+	MaxConcurrent int               `yaml:"max_concurrent,omitempty"`
+	TmuxSession   string            `yaml:"tmux_session,omitempty"`
+	ClaudeFlags   string            `yaml:"claude_flags,omitempty"`
+	Models        map[string]string `yaml:"models,omitempty"` // task type → model name
+}
+
+// ModelFor returns the model to use for a given task type.
+// Falls back to "default", then "" (use claude's default).
+func (d DispatchCfg) ModelFor(taskType string) string {
+	if d.Models != nil {
+		if m, ok := d.Models[taskType]; ok {
+			return m
+		}
+		if m, ok := d.Models["default"]; ok {
+			return m
+		}
+	}
+	return ""
 }
 
 // GitHubCfg holds GitHub repository information.
