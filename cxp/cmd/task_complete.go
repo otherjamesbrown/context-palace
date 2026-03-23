@@ -35,10 +35,15 @@ Steps:
 			return fmt.Errorf("task not found: %s", taskID)
 		}
 
-		// Skip if already needs-review or closed
-		if task.Status == "needs-review" || task.Status == "closed" {
-			fmt.Printf("Task %s already %s, skipping\n", taskID, task.Status)
+		// If already closed, skip entirely
+		if task.Status == "closed" {
+			fmt.Printf("Task %s already closed, skipping\n", taskID)
 			return nil
+		}
+
+		// If already needs-review, validate instead of skip
+		if task.Status == "needs-review" {
+			return validateCompletion(ctx, taskID, task, cpClient)
 		}
 
 		// Get worktree path from metadata
@@ -145,6 +150,62 @@ Steps:
 		fmt.Printf("Task %s complete → needs-review\n", taskID)
 		return nil
 	},
+}
+
+// validateCompletion checks that a needs-review task actually has the goods.
+// If anything is missing, fixes it.
+func validateCompletion(ctx context.Context, taskID string, task *client.Shard, c *client.Client) error {
+	issues := []string{}
+
+	// Check worktree exists
+	wtPath, _ := c.GetMetadataField(ctx, taskID, []string{"worktree_path"})
+
+	// Check branch has commits
+	if wtPath != "" {
+		commitOut, err := exec.Command("git", "-C", wtPath, "log", "--oneline", "main..HEAD").Output()
+		if err != nil || len(strings.TrimSpace(string(commitOut))) == 0 {
+			issues = append(issues, "no commits on branch")
+		}
+	}
+
+	// Check PR exists
+	prURL, _ := c.GetMetadataField(ctx, taskID, []string{"pr_url"})
+	if prURL == "" {
+		issues = append(issues, "no PR created")
+		// Auto-fix: try to create PR
+		if wtPath != "" {
+			fmt.Println("Validation: no PR — creating one...")
+			repoRoot, _ := client.RepoForProject(c.Config.Project)
+			pCfg, _ := client.LoadPipelineConfig(repoRoot)
+			repo := ""
+			if pCfg != nil && pCfg.GitHub.OwnerRepo != "" {
+				repo = pCfg.GitHub.OwnerRepo
+			}
+			if repo != "" {
+				branch, _ := exec.Command("git", "-C", wtPath, "branch", "--show-current").Output()
+				branchName := strings.TrimSpace(string(branch))
+				exec.Command("git", "-C", wtPath, "push", "-u", "origin", branchName).Run()
+				prBody := fmt.Sprintf("## Task\n[%s] %s\n\n---\nPipeline task: %s", taskID, task.Title, taskID)
+				prOut, err := exec.Command("gh", "pr", "create",
+					"--repo", repo, "--head", branchName, "--base", "main",
+					"--title", fmt.Sprintf("%s (%s)", task.Title, taskID),
+					"--body", prBody).CombinedOutput()
+				if err == nil {
+					prURL = strings.TrimSpace(string(prOut))
+					fmt.Printf("Validation: PR created: %s\n", prURL)
+					prJSON, _ := json.Marshal(prURL)
+					c.SetMetadataPath(ctx, taskID, []string{"pr_url"}, prJSON)
+				}
+			}
+		}
+	}
+
+	if len(issues) > 0 && prURL == "" {
+		fmt.Printf("Validation issues for %s: %s\n", taskID, strings.Join(issues, ", "))
+	} else {
+		fmt.Printf("Task %s validation passed (needs-review with PR)\n", taskID)
+	}
+	return nil
 }
 
 func init() {

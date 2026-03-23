@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -213,11 +214,19 @@ var taskDispatchCmd = &cobra.Command{
 			return fmt.Errorf("failed to spawn tmux window: %s\n%s", err, string(tmuxOut))
 		}
 
-		// 9. Record dispatch metadata
+		// 9. Capture output to log file
+		logDir := filepath.Join(worktreePath, ".cxp")
+		os.MkdirAll(logDir, 0755)
+		logFile := filepath.Join(logDir, "session.log")
+		exec.CommandContext(ctx, "tmux", "pipe-pane", "-t", fmt.Sprintf("%s:%s", tmuxSession, taskID),
+			fmt.Sprintf("cat >> '%s'", strings.ReplaceAll(logFile, "'", "'\\''"))).Run()
+
+		// 10. Record dispatch metadata
 		dispatchInfo := map[string]string{
 			"dispatched_at": time.Now().UTC().Format(time.RFC3339),
 			"agent":         agent,
 			"tmux_window":   taskID,
+			"log_file":      logFile,
 		}
 		patch, _ := json.Marshal(dispatchInfo)
 		if _, err := cpClient.UpdateMetadata(ctx, taskID, patch); err != nil {
