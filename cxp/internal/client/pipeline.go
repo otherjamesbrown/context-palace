@@ -451,7 +451,28 @@ func (c *Client) PipelineDecompose(ctx context.Context, designID, verdict string
 			}
 		}
 
-		// c. Validate acyclic
+		// c. Validate integration test task exists (labeled "integration-test")
+		hasIntegrationTest := false
+		for _, te := range taskEdges {
+			shard, err := c.GetShard(ctx, te.ShardID)
+			if err != nil {
+				continue
+			}
+			for _, label := range shard.Labels {
+				if label == "integration-test" {
+					hasIntegrationTest = true
+					break
+				}
+			}
+			if hasIntegrationTest {
+				break
+			}
+		}
+		if !hasIntegrationTest {
+			return nil, fmt.Errorf("cannot pass decomposition: no integration test task found (create a task with label 'integration-test' that verifies the design's success criteria end-to-end)")
+		}
+
+		// d. Validate acyclic
 		_, depsErr := c.GetTaskDeps(ctx, designID)
 		if depsErr != nil {
 			if strings.Contains(depsErr.Error(), "circular") {

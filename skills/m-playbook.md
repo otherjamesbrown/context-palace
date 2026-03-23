@@ -103,7 +103,24 @@ Design mentions:
    # blocked-by edges are set in task create --blocked-by <predecessor-id>
    ```
 
-5. **Record decomposition verdict and advance phase:**
+5. **Create integration test task** as the final wave — blocked by all other tasks:
+   ```bash
+   cxp task create "Integration test: <design title>" --parent <design-id> --body "<test spec>"
+   # blocked-by every other task
+   cxp shard edge create <test-task-id> <task-1-id> blocked-by
+   cxp shard edge create <test-task-id> <task-2-id> blocked-by
+   # ... for all tasks
+   ```
+
+   The integration test task must:
+   - Convert the design's success criteria into concrete, executable test cases
+   - Verify cross-task integration (task A's output feeds correctly into task B)
+   - Run e2e against the assembled result, not individual pieces
+   - Label: `integration-test`
+
+   **Every decomposition must have exactly one integration test task.** The decompose gate will reject without it.
+
+6. **Record decomposition verdict and advance phase:**
    ```bash
    cxp shard pipeline decompose <design-id> --verdict pass --body "<rationale and findings>"
    ```
