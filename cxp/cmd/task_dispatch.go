@@ -103,8 +103,12 @@ var taskDispatchCmd = &cobra.Command{
 			promptBuilder.WriteString(designContext)
 			promptBuilder.WriteString("\n\n")
 		}
-		// Load pipeline config for build/test instructions
-		pCfg, _ := client.LoadPipelineConfig(worktreePath)
+		// Load pipeline config — try repo root from registry, fall back to worktree path
+		repoRoot, _ := client.RepoForProject(cpClient.Config.Project)
+		pCfg, _ := client.LoadPipelineConfig(repoRoot)
+		if pCfg == nil {
+			pCfg, _ = client.LoadPipelineConfig(worktreePath)
+		}
 		if pCfg == nil {
 			pCfg = client.DefaultPipelineConfig()
 		}
@@ -136,8 +140,14 @@ var taskDispatchCmd = &cobra.Command{
 		// 6. Build tmux command
 		// Escape single quotes in prompt for shell
 		escapedPrompt := strings.ReplaceAll(prompt, "'", "'\\''")
+		// Read tmux session from pipeline config
+		tmuxSession := "main"
+		if pCfg != nil && pCfg.Dispatch.TmuxSession != "" {
+			tmuxSession = pCfg.Dispatch.TmuxSession
+		}
+
 		tmuxCmd := fmt.Sprintf("cd '%s' && claude --print '%s'", strings.ReplaceAll(worktreePath, "'", "'\\''"), escapedPrompt)
-		tmuxArgs := []string{"new-window", "-n", taskID, "-t", "main", tmuxCmd}
+		tmuxArgs := []string{"new-window", "-n", taskID, "-t", tmuxSession, tmuxCmd}
 
 		// Dry-run: print everything and exit
 		if dryRun {
