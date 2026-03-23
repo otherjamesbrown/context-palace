@@ -39,10 +39,13 @@ func (c *Client) GetTaskDeps(ctx context.Context, designID string) (*TaskDepsRes
 		return &TaskDepsResult{}, nil
 	}
 
-	// Build set of child task IDs
+	// Build set of child task IDs (filter to type=task only, exclude review/decompose shards)
 	childIDs := make(map[string]bool, len(childEdges))
 	taskInfo := make(map[string]EdgeInfo, len(childEdges))
 	for _, e := range childEdges {
+		if e.Type != "task" {
+			continue
+		}
 		childIDs[e.ShardID] = true
 		taskInfo[e.ShardID] = e
 	}
