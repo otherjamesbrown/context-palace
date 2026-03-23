@@ -62,6 +62,7 @@ type PipelineConfig struct {
 	Review          ReviewCfg           `yaml:"review,omitempty"`
 	Context         ContextConfig                `yaml:"context,omitempty"`
 	Workflows       map[string]WorkflowConfig   `yaml:"workflows,omitempty"`
+	Deploy          DeployCfg                    `yaml:"deploy,omitempty"`
 	GitHub          GitHubCfg                    `yaml:"github,omitempty"`
 	SkillsDir       string              `yaml:"skills_dir,omitempty"`
 	Phases          []PhaseConfig       `yaml:"phases,omitempty"`
@@ -111,6 +112,19 @@ func (c *PipelineConfig) ModelForPhase(phaseName, gateName string) string {
 // GitHubCfg holds GitHub repository information.
 type GitHubCfg struct {
 	OwnerRepo string `yaml:"owner_repo"`
+}
+
+// DeployServiceCfg maps file paths to deploy commands.
+type DeployServiceCfg struct {
+	Name    string   `yaml:"name"`
+	Paths   []string `yaml:"paths"`
+	Command string   `yaml:"command"`
+}
+
+// DeployCfg controls auto-deploy after PR merge.
+type DeployCfg struct {
+	Enabled  bool               `yaml:"enabled,omitempty"`
+	Services []DeployServiceCfg `yaml:"services,omitempty"`
 }
 
 // CICfg controls how CI results are evaluated.
