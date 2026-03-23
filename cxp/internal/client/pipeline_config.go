@@ -38,6 +38,7 @@ type PipelineConfig struct {
 	Agents          map[string]AgentCfg `yaml:"agents,omitempty"`
 	Dispatch        DispatchCfg         `yaml:"dispatch,omitempty"`
 	Monitoring      MonitoringCfg       `yaml:"monitoring,omitempty"`
+	Review          ReviewCfg           `yaml:"review,omitempty"`
 	GitHub          GitHubCfg           `yaml:"github,omitempty"`
 	SkillsDir       string              `yaml:"skills_dir,omitempty"`
 	Phases          []PhaseConfig       `yaml:"phases,omitempty"`
@@ -58,6 +59,16 @@ type DispatchCfg struct {
 // GitHubCfg holds GitHub repository information.
 type GitHubCfg struct {
 	OwnerRepo string `yaml:"owner_repo"`
+}
+
+// ReviewCfg controls how PRs are reviewed.
+type ReviewCfg struct {
+	WaitForCI         bool     `yaml:"wait_for_ci,omitempty"`
+	Strategy          string   `yaml:"strategy,omitempty"`          // "external" or "agent"
+	ExternalReviewers []string `yaml:"external_reviewers,omitempty"` // GitHub bot usernames
+	ProcessSkill      string   `yaml:"process_skill,omitempty"`     // skill for processing external reviews
+	ReviewSkill       string   `yaml:"review_skill,omitempty"`      // skill for agent-based reviews
+	ReviewAgent       string   `yaml:"review_agent,omitempty"`      // who does agent reviews
 }
 
 // MonitoringCfg controls health monitoring for dispatched agents.

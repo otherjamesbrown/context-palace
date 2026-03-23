@@ -29,6 +29,13 @@ monitoring:
         on_stall: skill:m-stall-check
         on_crash: redispatch
         on_max_retries: escalate
+
+# Review process
+review:
+    wait_for_ci: false                   # no CI on this repo yet
+    strategy: agent                      # spawn our own reviewer
+    review_skill: m-review-pr            # skill for the review agent
+    review_agent: agent-mycroft          # who reviews
 github:
     owner_repo: otherjamesbrown/context-palace
 skills_dir: skills
