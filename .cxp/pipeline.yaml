@@ -6,63 +6,66 @@ build:
 test:
     - cd cxp && go test ./...
     - cd cxp && go vet ./...
+
 agents:
-    agent-mycroft:
-        domains:
-            - backend
-            - services
     agent-steve:
-        domains:
-            - cli
-            - migrations
+        domains: [cli, migrations, shard-model]
+    agent-mycroft:
+        domains: [backend, services]
+
 dispatch:
     max_concurrent: 3
     tmux_session: main
     claude_flags: "--dangerously-skip-permissions"
-    models:
-        default: sonnet
-        implementation: sonnet
-        review: haiku
-        decomposition: sonnet
-        integration-test: sonnet
-        readiness-check: haiku
+    default_model: sonnet
 
 monitoring:
     stall_timeout: 30m
     crash_check: true
     max_retries: 3
     cooldown: 5m
+    model: haiku
     actions:
         on_stall: skill:m-stall-check
         on_crash: redispatch
         on_max_retries: escalate
 
-# Review process
 review:
     ci:
-        mode: ignore                     # no CI on this repo yet
+        mode: ignore
         wait: false
-    strategy: agent                      # spawn our own reviewer
-    review_skill: m-review-pr            # skill for the review agent
-    review_agent: agent-mycroft          # who reviews
+    strategy: agent
+    review_skill: m-review-pr
+    review_agent: agent-mycroft
+    model: haiku
+
 github:
     owner_repo: otherjamesbrown/context-palace
+
 skills_dir: skills
 
-# Pipeline phases and gates
-# Add a phase by adding an entry here + writing a skill file
 phases:
     - name: design
+      model: haiku
       gates:
           - name: readiness-review
             skill: m-readiness-check
+            model: haiku
             fields:
                 readiness: {type: int, min: 1, max: 5, required: true}
+
     - name: decompose
+      model: sonnet
       gates:
           - name: decomposition-review
             skill: m-decomposition-review
+            model: haiku
             requires_label: integration-test
+
     - name: implement
+      model: sonnet
+
     - name: review
+      model: haiku
+
     - name: done

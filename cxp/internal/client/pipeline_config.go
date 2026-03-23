@@ -20,6 +20,7 @@ type GateFieldConfig struct {
 type GateConfig struct {
 	Name          string                     `yaml:"name"`
 	Skill         string                     `yaml:"skill,omitempty"`
+	Model         string                     `yaml:"model,omitempty"`
 	Fields        map[string]GateFieldConfig `yaml:"fields,omitempty"`
 	RequiresLabel string                     `yaml:"requires_label,omitempty"`
 }
@@ -27,6 +28,7 @@ type GateConfig struct {
 // PhaseConfig describes a pipeline phase and its gates.
 type PhaseConfig struct {
 	Name  string       `yaml:"name"`
+	Model string       `yaml:"model,omitempty"`
 	Gates []GateConfig `yaml:"gates,omitempty"`
 }
 
@@ -51,24 +53,38 @@ type AgentCfg struct {
 
 // DispatchCfg controls how work is dispatched to agents.
 type DispatchCfg struct {
-	MaxConcurrent int               `yaml:"max_concurrent,omitempty"`
-	TmuxSession   string            `yaml:"tmux_session,omitempty"`
-	ClaudeFlags   string            `yaml:"claude_flags,omitempty"`
-	Models        map[string]string `yaml:"models,omitempty"` // task type → model name
+	MaxConcurrent int    `yaml:"max_concurrent,omitempty"`
+	TmuxSession   string `yaml:"tmux_session,omitempty"`
+	ClaudeFlags   string `yaml:"claude_flags,omitempty"`
+	DefaultModel  string `yaml:"default_model,omitempty"` // fallback model
 }
 
-// ModelFor returns the model to use for a given task type.
-// Falls back to "default", then "" (use claude's default).
-func (d DispatchCfg) ModelFor(taskType string) string {
-	if d.Models != nil {
-		if m, ok := d.Models[taskType]; ok {
-			return m
-		}
-		if m, ok := d.Models["default"]; ok {
-			return m
+// ModelForPhase resolves the model to use for a given phase.
+// Priority: gate model → phase model → dispatch default_model → ""
+func (c *PipelineConfig) ModelForPhase(phaseName, gateName string) string {
+	if c == nil {
+		return ""
+	}
+	// Check gate-level model
+	if gateName != "" {
+		if gate := c.FindGate(phaseName, gateName); gate != nil && gate.Model != "" {
+			return gate.Model
 		}
 	}
-	return ""
+	// Check phase-level model
+	if phase := c.FindPhase(phaseName); phase != nil && phase.Model != "" {
+		return phase.Model
+	}
+	// Check review-level model
+	if c.Review.Model != "" && (phaseName == "review") {
+		return c.Review.Model
+	}
+	// Check monitoring-level model
+	if c.Monitoring.Model != "" && (phaseName == "monitoring" || gateName == "stall-check") {
+		return c.Monitoring.Model
+	}
+	// Fallback to dispatch default
+	return c.Dispatch.DefaultModel
 }
 
 // GitHubCfg holds GitHub repository information.
@@ -90,6 +106,7 @@ type ReviewCfg struct {
 	ProcessSkill      string   `yaml:"process_skill,omitempty"`      // skill for processing external reviews
 	ReviewSkill       string   `yaml:"review_skill,omitempty"`       // skill for agent-based reviews
 	ReviewAgent       string   `yaml:"review_agent,omitempty"`       // who does agent reviews
+	Model             string   `yaml:"model,omitempty"`              // model for review tasks
 }
 
 // MonitoringCfg controls health monitoring for dispatched agents.
@@ -98,6 +115,7 @@ type MonitoringCfg struct {
 	CrashCheck   bool              `yaml:"crash_check,omitempty"`
 	MaxRetries   int               `yaml:"max_retries,omitempty"`
 	Cooldown     string            `yaml:"cooldown,omitempty"` // e.g. "5m"
+	Model        string            `yaml:"model,omitempty"`    // model for health checks
 	Actions      MonitoringActions `yaml:"actions,omitempty"`
 }
 
@@ -126,17 +144,22 @@ func DefaultPipelineConfig() *PipelineConfig {
 			MaxConcurrent: 3,
 			TmuxSession:   "main",
 			ClaudeFlags:   "--print",
+			DefaultModel:  "sonnet",
 		},
 		Monitoring: MonitoringCfg{
 			StallTimeout: "30m",
 			CrashCheck:   true,
 			MaxRetries:   3,
 			Cooldown:     "5m",
+			Model:        "haiku",
 			Actions: MonitoringActions{
 				OnStall:      "skill:m-stall-check",
 				OnCrash:      "redispatch",
 				OnMaxRetries: "escalate",
 			},
+		},
+		Review: ReviewCfg{
+			Model: "haiku",
 		},
 		SkillsDir: "skills",
 	}
@@ -210,6 +233,7 @@ func MergePipelineConfig(base, override *PipelineConfig) *PipelineConfig {
 	out.Agents = copyAgents(base.Agents)
 	out.Dispatch = base.Dispatch
 	out.Monitoring = base.Monitoring
+	out.Review = base.Review
 	out.GitHub = base.GitHub
 	out.SkillsDir = base.SkillsDir
 	out.Phases = copyPhases(base.Phases)
@@ -248,6 +272,27 @@ func MergePipelineConfig(base, override *PipelineConfig) *PipelineConfig {
 	if override.Dispatch.ClaudeFlags != "" {
 		out.Dispatch.ClaudeFlags = override.Dispatch.ClaudeFlags
 	}
+	if override.Dispatch.DefaultModel != "" {
+		out.Dispatch.DefaultModel = override.Dispatch.DefaultModel
+	}
+	if override.Review.Model != "" {
+		out.Review.Model = override.Review.Model
+	}
+	if override.Review.Strategy != "" {
+		out.Review.Strategy = override.Review.Strategy
+	}
+	if override.Review.ReviewSkill != "" {
+		out.Review.ReviewSkill = override.Review.ReviewSkill
+	}
+	if override.Review.ReviewAgent != "" {
+		out.Review.ReviewAgent = override.Review.ReviewAgent
+	}
+	if override.Review.ProcessSkill != "" {
+		out.Review.ProcessSkill = override.Review.ProcessSkill
+	}
+	if override.Review.ExternalReviewers != nil {
+		out.Review.ExternalReviewers = copyStrings(override.Review.ExternalReviewers)
+	}
 	if override.GitHub.OwnerRepo != "" {
 		out.GitHub.OwnerRepo = override.GitHub.OwnerRepo
 	}
@@ -276,6 +321,9 @@ func MergePipelineConfig(base, override *PipelineConfig) *PipelineConfig {
 	}
 	if override.Monitoring.Actions.OnMaxRetries != "" {
 		out.Monitoring.Actions.OnMaxRetries = override.Monitoring.Actions.OnMaxRetries
+	}
+	if override.Monitoring.Model != "" {
+		out.Monitoring.Model = override.Monitoring.Model
 	}
 
 	return out

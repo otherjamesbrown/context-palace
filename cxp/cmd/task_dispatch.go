@@ -162,7 +162,7 @@ var taskDispatchCmd = &cobra.Command{
 
 		// Add model flag if configured
 		if pCfg != nil {
-			model := pCfg.Dispatch.ModelFor("implementation")
+			model := pCfg.ModelForPhase("implement", "")
 			if model != "" {
 				claudeFlags += " --model " + model
 			}
