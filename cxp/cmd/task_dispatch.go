@@ -150,14 +150,19 @@ var taskDispatchCmd = &cobra.Command{
 		promptFile.Close()
 		promptPath := promptFile.Name()
 
-		// Read tmux session from pipeline config
+		// Read dispatch config
 		tmuxSession := "main"
 		if pCfg != nil && pCfg.Dispatch.TmuxSession != "" {
 			tmuxSession = pCfg.Dispatch.TmuxSession
 		}
+		claudeFlags := "--print"
+		if pCfg != nil && pCfg.Dispatch.ClaudeFlags != "" {
+			claudeFlags = pCfg.Dispatch.ClaudeFlags
+		}
 
-		shellCmd := fmt.Sprintf("cd '%s' && claude --print \"$(cat '%s')\" ; rm -f '%s'",
+		shellCmd := fmt.Sprintf("cd '%s' && claude %s \"$(cat '%s')\" ; rm -f '%s'",
 			strings.ReplaceAll(worktreePath, "'", "'\\''"),
+			claudeFlags,
 			strings.ReplaceAll(promptPath, "'", "'\\''"),
 			strings.ReplaceAll(promptPath, "'", "'\\''"))
 		tmuxArgs := []string{"new-window", "-n", taskID, "-t", tmuxSession, shellCmd}
