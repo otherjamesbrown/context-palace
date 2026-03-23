@@ -32,6 +32,19 @@ type PhaseConfig struct {
 	Gates []GateConfig `yaml:"gates,omitempty"`
 }
 
+// ContextLayer defines a piece of context that can be injected into agent sessions.
+type ContextLayer struct {
+	Name   string `yaml:"name"`
+	Source string `yaml:"source"` // "file:<path>", "shard:<id>", "skills:<name>", "dispatch-prompt", "parent-design"
+	When   string `yaml:"when"`   // "interactive", "dispatch", "always", "gate:<name>"
+	Filter []string `yaml:"filter,omitempty"` // for skills source: only load these files
+}
+
+// ContextConfig controls what context is injected into agent sessions.
+type ContextConfig struct {
+	Layers []ContextLayer `yaml:"layers,omitempty"`
+}
+
 // PipelineConfig holds pipeline configuration loaded from YAML files.
 type PipelineConfig struct {
 	Build           []string            `yaml:"build,omitempty"`
@@ -41,6 +54,7 @@ type PipelineConfig struct {
 	Dispatch        DispatchCfg         `yaml:"dispatch,omitempty"`
 	Monitoring      MonitoringCfg       `yaml:"monitoring,omitempty"`
 	Review          ReviewCfg           `yaml:"review,omitempty"`
+	Context         ContextConfig       `yaml:"context,omitempty"`
 	GitHub          GitHubCfg           `yaml:"github,omitempty"`
 	SkillsDir       string              `yaml:"skills_dir,omitempty"`
 	Phases          []PhaseConfig       `yaml:"phases,omitempty"`

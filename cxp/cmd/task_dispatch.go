@@ -132,7 +132,16 @@ var taskDispatchCmd = &cobra.Command{
 
 		prompt := promptBuilder.String()
 
-		// 6. Write prompt to temp file (avoids shell arg length limits)
+		// 6. Generate worktree CLAUDE.md from context config
+		extras := map[string]string{
+			"dispatch-prompt": prompt,
+			"parent-design":  designContext,
+		}
+		if err := client.WriteWorktreeCLAUDEMD(ctx, pCfg, repoRoot, worktreePath, "dispatch", extras, cpClient); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not generate worktree CLAUDE.md: %v\n", err)
+		}
+
+		// 7. Write prompt to temp file (avoids shell arg length limits)
 		promptFile, err := os.CreateTemp("", fmt.Sprintf("cxp-dispatch-%s-*.md", taskID))
 		if err != nil {
 			return fmt.Errorf("failed to create prompt file: %v", err)

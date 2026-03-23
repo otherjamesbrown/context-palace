@@ -39,6 +39,19 @@ review:
     review_agent: agent-mycroft
     model: haiku
 
+# Context layers
+context:
+    layers:
+        - name: agent-identity
+          source: claude-md
+          when: interactive
+        - name: task-prompt
+          source: dispatch-prompt
+          when: dispatch
+        - name: design-context
+          source: parent-design
+          when: dispatch
+
 github:
     owner_repo: otherjamesbrown/context-palace
 
