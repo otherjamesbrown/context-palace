@@ -41,9 +41,30 @@ var taskPRMergeCmd = &cobra.Command{
 			return nil
 		}
 
-		// 2. Merge the PR
+		// 2. Merge the PR (with auto-rebase on conflict)
 		ghMergeArgs := []string{"pr", "merge", prURL, mergeStrategy, "--delete-branch"}
 		mergeOut, err := exec.CommandContext(ctx, "gh", ghMergeArgs...).CombinedOutput()
+		if err != nil && strings.Contains(string(mergeOut), "not mergeable") {
+			// Auto-rebase: get worktree path and rebase onto main
+			fmt.Println("PR has conflicts — auto-rebasing onto main...")
+			wtPath, _ := cpClient.GetMetadataField(ctx, taskID, []string{"worktree_path"})
+			if wtPath != "" {
+				exec.CommandContext(ctx, "git", "-C", wtPath, "fetch", "origin", "main").Run()
+				rebaseOut, rebaseErr := exec.CommandContext(ctx, "git", "-C", wtPath, "rebase", "origin/main", "-X", "theirs").CombinedOutput()
+				if rebaseErr != nil {
+					exec.CommandContext(ctx, "git", "-C", wtPath, "rebase", "--abort").Run()
+					return fmt.Errorf("auto-rebase failed: %s\n%s", rebaseErr, string(rebaseOut))
+				}
+				pushOut, pushErr := exec.CommandContext(ctx, "git", "-C", wtPath, "push", "--force-with-lease").CombinedOutput()
+				if pushErr != nil {
+					return fmt.Errorf("push after rebase failed: %s\n%s", pushErr, string(pushOut))
+				}
+				fmt.Println("Rebased and pushed. Retrying merge...")
+				// Wait for GitHub to process the push
+				exec.CommandContext(ctx, "sleep", "10").Run()
+				mergeOut, err = exec.CommandContext(ctx, "gh", ghMergeArgs...).CombinedOutput()
+			}
+		}
 		if err != nil {
 			return fmt.Errorf("failed to merge PR: %w\n%s", err, string(mergeOut))
 		}

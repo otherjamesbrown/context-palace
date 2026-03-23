@@ -5,6 +5,12 @@
 
 set -euo pipefail
 
+# If dispatched by the pipeline, skip the work queue and menu.
+if [ "${CXP_DISPATCH:-}" = "true" ]; then
+  echo "[Dispatched session — task context provided via prompt]"
+  exit 0
+fi
+
 # Instance identity (first 8 chars of conversation UUID)
 PROJ_DIR="$HOME/.claude/projects/-Users-james-github-otherjamesbrown-context-palace"
 INSTANCE_ID=$(basename "$(ls -t "$PROJ_DIR"/*.jsonl 2>/dev/null | head -1)" .jsonl 2>/dev/null | cut -c1-8)

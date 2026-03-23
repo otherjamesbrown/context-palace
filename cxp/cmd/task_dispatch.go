@@ -127,14 +127,7 @@ var taskDispatchCmd = &cobra.Command{
 			promptBuilder.WriteString(fmt.Sprintf("%d. Build: `%s`\n", step, strings.Join(pCfg.Build, " && ")))
 			step++
 		}
-		promptBuilder.WriteString(fmt.Sprintf("%d. Append evidence:\n", step))
-		promptBuilder.WriteString("   ```\n")
-		promptBuilder.WriteString("   cxp task evidence " + taskID + " --files \"<files changed>\" --commit <hash> --body \"<verification notes>\"\n")
-		promptBuilder.WriteString("   ```\n")
-		step++
-		promptBuilder.WriteString(fmt.Sprintf("%d. Create PR: `cxp task pr create %s`\n", step, taskID))
-		step++
-		promptBuilder.WriteString(fmt.Sprintf("%d. Mark for review: `cxp shard status %s needs-review`\n", step, taskID))
+		promptBuilder.WriteString(fmt.Sprintf("%d. **Run `cxp task complete %s`** — this commits remaining changes, pushes, creates the PR, appends evidence, and marks the task needs-review. Do this as your LAST action.\n", step, taskID))
 
 		prompt := promptBuilder.String()
 
@@ -171,7 +164,7 @@ var taskDispatchCmd = &cobra.Command{
 		// Post-completion handler: cxp task complete runs after agent exits
 		completeCmd := fmt.Sprintf("cxp task complete '%s'", strings.ReplaceAll(taskID, "'", "'\\''"))
 
-		shellCmd := fmt.Sprintf("cd '%s' && claude %s \"$(cat '%s')\" ; rm -f '%s' ; %s",
+		shellCmd := fmt.Sprintf("cd '%s' && CXP_DISPATCH=true claude %s \"$(cat '%s')\" ; rm -f '%s' ; %s",
 			strings.ReplaceAll(worktreePath, "'", "'\\''"),
 			claudeFlags,
 			strings.ReplaceAll(promptPath, "'", "'\\''"),
