@@ -2,8 +2,7 @@
 
 You are M, checking whether a design can be implemented without further input from James.
 
-## Input
-- Design shard ID
+This skill is called as part of the readiness check (`skills/m-readiness-check.md`). You do not need to call this separately — the readiness check includes implementability.
 
 ## The Question
 
@@ -15,28 +14,21 @@ You are M, checking whether a design can be implemented without further input fr
 |------|---------|
 | Architecture | Technical approach is specified (not "TBD" or "to be decided") |
 | Code locations | File paths or modules are identified |
-| Data model | Schema changes or new types are described |
+| Data model | Schema changes or new types are described with field names and types |
 | API surface | Endpoints, commands, or interfaces are defined |
-| Dependencies | External deps and integration points are listed |
-| Edge cases | Error handling approach is mentioned |
+| Migration | Rollout strategy stated (even if "single PR, no migration needed") |
+| Error handling | What happens on failure is defined |
 
-## If implementable
-```bash
-cxp shard append <design-id> --body "Implementability check passed. Design is ready for decomposition."
-cxp shard pipeline update <design-id> --phase decompose
-cxp shard pipeline unlock <design-id>
-```
+## Common gaps
 
-## If not implementable
+| Gap | What's needed |
+|-----|--------------|
+| "Somewhere in the pipeline code" | Specific file path and line numbers |
+| "We need a new config format" | Schema with field names and types |
+| "Option A or B" | Pick one and state why |
+| "Handle errors appropriately" | Define what "appropriately" means |
+| "Should be backward-compatible" | Describe the specific constraint |
 
-List the questions an implementer would need to ask:
-```bash
-cxp shard append <design-id> --body "## Implementability Check Failed
-The following questions would block an implementer:
-- <question 1>
-- <question 2>
+## Recording
 
-Action: James to clarify these points in the design."
-cxp shard label add <design-id> blocked
-cxp shard pipeline unlock <design-id>
-```
+Do NOT record implementability separately. Include it in the `--body` of `cxp shard pipeline review` as part of the readiness check. See `skills/m-readiness-check.md` for the full recording flow.

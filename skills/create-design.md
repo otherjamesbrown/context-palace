@@ -2,6 +2,8 @@
 
 When creating a design shard, follow this structure. Designs that don't meet these criteria will be sent back by the pipeline readiness check.
 
+**Evaluated by:** `skills/m-readiness-check.md` — M runs this check before advancing a design to decomposition. The 5 readiness criteria and implementability check map directly to the required sections below.
+
 ---
 
 ## Required Sections

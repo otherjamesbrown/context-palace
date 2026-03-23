@@ -22,16 +22,33 @@ func ValidatePipelinePhase(phase string) error {
 	return fmt.Errorf("invalid pipeline phase %q; valid phases: %v", phase, ValidPipelinePhases)
 }
 
+// ReviewHistoryEntry records a single review round
+type ReviewHistoryEntry struct {
+	Round     int    `json:"round"`
+	Verdict   string `json:"verdict"`
+	ShardID   string `json:"shard_id"`
+	Timestamp string `json:"timestamp"`
+}
+
+// ReviewState tracks cumulative review history on a pipeline
+type ReviewState struct {
+	Round           int                  `json:"round"`
+	LastVerdict     string               `json:"last_verdict"`
+	LastReviewShard string               `json:"last_review_shard"`
+	History         []ReviewHistoryEntry `json:"history"`
+}
+
 // PipelineState represents the pipeline metadata stored on a design shard
 type PipelineState struct {
-	Phase           string              `json:"phase"`
-	LockedBy        *string             `json:"locked_by"`
-	LockExpires     *time.Time          `json:"lock_expires"`
-	WaitingFor      []string            `json:"waiting_for"`
-	LastProgress    string              `json:"last_progress"`
-	TaskShards      []string            `json:"task_shards"`
-	CumulativeTokens int               `json:"cumulative_tokens"`
-	IterationCounts map[string]int      `json:"iteration_counts"`
+	Phase            string              `json:"phase"`
+	LockedBy         *string             `json:"locked_by"`
+	LockExpires      *time.Time          `json:"lock_expires"`
+	WaitingFor       []string            `json:"waiting_for"`
+	LastProgress     string              `json:"last_progress"`
+	TaskShards       []string            `json:"task_shards"`
+	CumulativeTokens int                 `json:"cumulative_tokens"`
+	IterationCounts  map[string]int      `json:"iteration_counts"`
+	Review           *ReviewState        `json:"review,omitempty"`
 }
 
 // DefaultPipelineState returns a new PipelineState with default values
@@ -248,4 +265,109 @@ func (c *Client) PipelineLockCheck(ctx context.Context, id string) (string, *Pip
 	}
 
 	return "stale", state, nil
+}
+
+// PipelineReviewResult holds the outcome of a pipeline review operation
+type PipelineReviewResult struct {
+	DesignID      string `json:"design_id"`
+	ReviewShardID string `json:"review_shard_id"`
+	Round         int    `json:"round"`
+	Verdict       string `json:"verdict"`
+	Readiness     int    `json:"readiness"`
+	Phase         string `json:"phase"`
+}
+
+// PipelineReview records a Phase 1 readiness review verdict, creates a review
+// sub-shard, updates pipeline metadata, and optionally advances the phase.
+func (c *Client) PipelineReview(ctx context.Context, designID, verdict string, readiness int, body string) (*PipelineReviewResult, error) {
+	// 1. Get pipeline state — verify phase is "design"
+	state, err := c.PipelineGet(ctx, designID)
+	if err != nil {
+		return nil, err
+	}
+	if state.Phase != "design" {
+		return nil, fmt.Errorf("pipeline phase is %q, expected 'design' for review", state.Phase)
+	}
+
+	// 2. Compute round
+	round := 1
+	if state.Review != nil {
+		round = state.Review.Round + 1
+	}
+
+	// 3. Build review shard content
+	now := time.Now().UTC()
+	timestamp := now.Format(time.RFC3339)
+	verdictUpper := verdict
+	if verdict == "pass" {
+		verdictUpper = "PASS"
+	} else {
+		verdictUpper = "FAIL"
+	}
+
+	content := fmt.Sprintf("# Phase 1 Readiness Review — Round %d\n\n**Design:** %s\n**Reviewer:** %s\n**Timestamp:** %s\n**Verdict:** %s\n**Readiness Score:** %d/5\n\n## Findings\n\n%s",
+		round, designID, c.Config.Agent, timestamp, verdictUpper, readiness, body)
+
+	// 4. Create review shard
+	title := fmt.Sprintf("Phase 1 Review — Round %d — %s", round, verdictUpper)
+	meta, _ := json.Marshal(map[string]any{
+		"design_id": designID,
+		"round":     round,
+		"verdict":   verdict,
+		"readiness": readiness,
+	})
+	reviewID, err := c.CreateShardWithMetadata(ctx, title, content, "review", nil, []string{"phase1-review"}, json.RawMessage(meta))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create review shard: %v", err)
+	}
+
+	// 5. Create child-of edge from review shard to design shard
+	if err := c.CreateEdgeSimple(ctx, reviewID, designID, "child-of"); err != nil {
+		return nil, fmt.Errorf("failed to create edge: %v", err)
+	}
+
+	// 6. Build updated ReviewState and write to pipeline metadata
+	reviewState := &ReviewState{
+		Round:           round,
+		LastVerdict:     verdict,
+		LastReviewShard: reviewID,
+		History: append(func() []ReviewHistoryEntry {
+			if state.Review != nil {
+				return state.Review.History
+			}
+			return nil
+		}(), ReviewHistoryEntry{
+			Round:     round,
+			Verdict:   verdict,
+			ShardID:   reviewID,
+			Timestamp: timestamp,
+		}),
+	}
+	reviewJSON, err := json.Marshal(reviewState)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal review state: %v", err)
+	}
+	if _, err := c.SetMetadataPath(ctx, designID, []string{"pipeline", "review"}, reviewJSON); err != nil {
+		return nil, fmt.Errorf("failed to update review metadata: %v", err)
+	}
+
+	// 7. If pass, advance phase to "decompose"
+	resultPhase := state.Phase
+	if verdict == "pass" {
+		decompose := "decompose"
+		updated, err := c.PipelineUpdate(ctx, designID, &decompose, nil, nil, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to advance phase: %v", err)
+		}
+		resultPhase = updated.Phase
+	}
+
+	return &PipelineReviewResult{
+		DesignID:      designID,
+		ReviewShardID: reviewID,
+		Round:         round,
+		Verdict:       verdict,
+		Readiness:     readiness,
+		Phase:         resultPhase,
+	}, nil
 }

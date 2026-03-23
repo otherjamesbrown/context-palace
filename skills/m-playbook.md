@@ -41,31 +41,21 @@ Does the design:
 
 ### Fast path (default)
 
-1. Read the design and check readiness:
-   - Links to an outcome? (child-of edge to an outcome shard)
-   - Problem clearly stated?
-   - User/consumer identified?
-   - Success criteria defined?
-   - Scope boundaries set?
-2. **Always append findings to the shard** — even when everything passes. This is the audit trail.
+Follow `skills/m-readiness-check.md` for the full procedure. Summary:
+
+1. Read the design and evaluate 5 readiness criteria + implementability check.
+2. **Record the verdict using the pipeline review command** (creates audit trail automatically):
    ```bash
-   cxp shard append <id> --body "## Phase 1: Readiness Check
-   *Reviewed by M at <timestamp>*
-   ### Readiness (N/5)
-   1. Links to outcome: PASS/FAIL — <detail>
-   2. Problem stated: PASS/FAIL — <detail>
-   3. User identified: PASS/FAIL — <detail>
-   4. Success criteria: PASS/FAIL — <detail>
-   5. Scope boundaries: PASS/FAIL — <detail>
-   ### Implementability Check
-   PASS/FAIL — <detail>
-   ### Verdict
-   <outcome>"
+   cxp shard pipeline review <id> --verdict pass|fail --readiness <N> --body "<findings>"
    ```
-3. If gaps found: set label `blocked`. Exit.
-4. Run implementability check: "Could an implementing agent write code from this design without asking James any questions?"
-5. If YES: `cxp shard pipeline update <id> --phase decompose`. Exit.
-6. If NO: set label `blocked`. Exit.
+   This command:
+   - Creates a review sub-shard linked to the design (audit trail)
+   - Updates pipeline metadata with structured verdict and round number
+   - If pass: automatically advances phase to `decompose`
+3. If fail: `cxp shard label add <id> blocked`. Exit.
+4. If pass: phase is already `decompose`. Exit.
+
+**Do NOT manually append findings or update the phase.** The review command handles everything.
 
 ### Full C/D/S path
 
@@ -324,6 +314,7 @@ If you crash without unlocking, the 5-minute TTL ensures recovery.
 |--------|---------|
 | Read pipeline state | `cxp shard pipeline show <id>` |
 | Update phase | `cxp shard pipeline update <id> --phase <phase>` |
+| Record Phase 1 review | `cxp shard pipeline review <id> --verdict pass\|fail --readiness N --body "..."` |
 | Lock pipeline | `cxp shard pipeline lock <id>` |
 | Unlock pipeline | `cxp shard pipeline unlock <id>` |
 | View task deps | `cxp task deps <design-id>` |

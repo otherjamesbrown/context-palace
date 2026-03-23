@@ -271,12 +271,78 @@ var shardPipelineLockCheckCmd = &cobra.Command{
 	},
 }
 
+var shardPipelineReviewCmd = &cobra.Command{
+	Use:   "review <design-id>",
+	Short: "Record Phase 1 readiness review verdict",
+	Args:  cobra.ExactArgs(1),
+	Example: `  cxp shard pipeline review pf-design-123 --verdict pass --readiness 4 --body "All criteria met."
+  cxp shard pipeline review pf-design-123 --verdict fail --readiness 2 --body-file review-notes.md`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		designID := args[0]
+
+		verdict, _ := cmd.Flags().GetString("verdict")
+		readiness, _ := cmd.Flags().GetInt("readiness")
+		body, _ := cmd.Flags().GetString("body")
+		bodyFile, _ := cmd.Flags().GetString("body-file")
+
+		// Validate verdict
+		if verdict == "" {
+			return fmt.Errorf("--verdict is required")
+		}
+		if verdict != "pass" && verdict != "fail" {
+			return fmt.Errorf("--verdict must be 'pass' or 'fail', got %q", verdict)
+		}
+
+		// Validate readiness
+		if readiness < 1 || readiness > 5 {
+			return fmt.Errorf("--readiness must be 1-5, got %d", readiness)
+		}
+
+		// Resolve body content
+		content, err := resolveBody(body, bodyFile)
+		if err != nil {
+			return err
+		}
+
+		result, err := cpClient.PipelineReview(ctx, designID, verdict, readiness, content)
+		if err != nil {
+			return err
+		}
+
+		if outputFormat == "json" {
+			s, _ := client.FormatJSON(result)
+			fmt.Println(s)
+			return nil
+		}
+
+		fmt.Printf("Recorded Phase 1 review for %s\n", result.DesignID)
+		fmt.Printf("  Review shard: %s\n", result.ReviewShardID)
+		fmt.Printf("  Round:        %d\n", result.Round)
+		phaseTransition := result.Phase
+		if result.Verdict == "pass" {
+			phaseTransition = "design → decompose"
+		}
+		fmt.Printf("  Verdict:      %s (%d/5)\n", result.Verdict, result.Readiness)
+		fmt.Printf("  Phase:        %s\n", phaseTransition)
+		return nil
+	},
+}
+
 func init() {
 	// pipeline update flags
 	shardPipelineUpdateCmd.Flags().String("phase", "", "Pipeline phase (design, decompose, implement, review, deploy, done)")
 	shardPipelineUpdateCmd.Flags().String("waiting-for", "", "JSON array of shard IDs to wait for")
 	shardPipelineUpdateCmd.Flags().String("add-task", "", "Shard ID to append to task_shards")
 	shardPipelineUpdateCmd.Flags().Int("tokens", 0, "Token count to add to cumulative_tokens")
+
+	// pipeline review flags
+	shardPipelineReviewCmd.Flags().String("verdict", "", "Review verdict: 'pass' or 'fail' (required)")
+	shardPipelineReviewCmd.Flags().Int("readiness", 0, "Readiness score 1-5 (required)")
+	shardPipelineReviewCmd.Flags().String("body", "", "Findings text")
+	shardPipelineReviewCmd.Flags().String("body-file", "", "Read findings from file")
+	_ = shardPipelineReviewCmd.MarkFlagRequired("verdict")
+	_ = shardPipelineReviewCmd.MarkFlagRequired("readiness")
 
 	// pipeline lock flags
 	shardPipelineLockCmd.Flags().String("session", "", "Session ID for the lock (defaults to agent name + timestamp)")
@@ -288,6 +354,7 @@ func init() {
 	shardPipelineCmd.AddCommand(shardPipelineLockCmd)
 	shardPipelineCmd.AddCommand(shardPipelineUnlockCmd)
 	shardPipelineCmd.AddCommand(shardPipelineLockCheckCmd)
+	shardPipelineCmd.AddCommand(shardPipelineReviewCmd)
 
 	shardCmd.AddCommand(shardPipelineCmd)
 }
