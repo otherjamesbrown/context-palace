@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -137,17 +138,29 @@ var taskDispatchCmd = &cobra.Command{
 
 		prompt := promptBuilder.String()
 
-		// 6. Build tmux command
-		// Escape single quotes in prompt for shell
-		escapedPrompt := strings.ReplaceAll(prompt, "'", "'\\''")
+		// 6. Write prompt to temp file (avoids shell arg length limits)
+		promptFile, err := os.CreateTemp("", fmt.Sprintf("cxp-dispatch-%s-*.md", taskID))
+		if err != nil {
+			return fmt.Errorf("failed to create prompt file: %v", err)
+		}
+		if _, err := promptFile.WriteString(prompt); err != nil {
+			promptFile.Close()
+			return fmt.Errorf("failed to write prompt file: %v", err)
+		}
+		promptFile.Close()
+		promptPath := promptFile.Name()
+
 		// Read tmux session from pipeline config
 		tmuxSession := "main"
 		if pCfg != nil && pCfg.Dispatch.TmuxSession != "" {
 			tmuxSession = pCfg.Dispatch.TmuxSession
 		}
 
-		tmuxCmd := fmt.Sprintf("cd '%s' && claude --print '%s'", strings.ReplaceAll(worktreePath, "'", "'\\''"), escapedPrompt)
-		tmuxArgs := []string{"new-window", "-n", taskID, "-t", tmuxSession, tmuxCmd}
+		shellCmd := fmt.Sprintf("cd '%s' && claude --print \"$(cat '%s')\" ; rm -f '%s'",
+			strings.ReplaceAll(worktreePath, "'", "'\\''"),
+			strings.ReplaceAll(promptPath, "'", "'\\''"),
+			strings.ReplaceAll(promptPath, "'", "'\\''"))
+		tmuxArgs := []string{"new-window", "-n", taskID, "-t", tmuxSession, shellCmd}
 
 		// Dry-run: print everything and exit
 		if dryRun {
