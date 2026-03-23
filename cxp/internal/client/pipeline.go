@@ -53,10 +53,15 @@ type PipelineState struct {
 	Decompose        *DecomposeState     `json:"decompose,omitempty"`
 }
 
-// DefaultPipelineState returns a new PipelineState with default values
-func DefaultPipelineState() PipelineState {
+// DefaultPipelineState returns a new PipelineState with default values.
+// startPhase overrides the initial phase (empty string defaults to "design").
+func DefaultPipelineState(startPhase ...string) PipelineState {
+	phase := "design"
+	if len(startPhase) > 0 && startPhase[0] != "" {
+		phase = startPhase[0]
+	}
 	return PipelineState{
-		Phase:            "design",
+		Phase:            phase,
 		LockedBy:         nil,
 		LockExpires:      nil,
 		WaitingFor:       []string{},
@@ -67,16 +72,18 @@ func DefaultPipelineState() PipelineState {
 	}
 }
 
-// PipelineInit initialises the pipeline metadata on a design shard.
-// Returns an error if the shard is not a design or already has pipeline metadata.
+// PipelineInit initialises the pipeline metadata on a shard.
+// Supports design, bug, and task shards — starting phase determined by workflow config.
 func (c *Client) PipelineInit(ctx context.Context, id string) (*PipelineState, error) {
-	// Verify it's a design shard
 	shard, err := c.GetShard(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if shard.Type != "design" {
-		return nil, fmt.Errorf("shard %s is type %q, expected 'design'", id, shard.Type)
+
+	// Validate shard type has a workflow
+	validTypes := map[string]bool{"design": true, "bug": true, "task": true}
+	if !validTypes[shard.Type] {
+		return nil, fmt.Errorf("shard %s is type %q — pipeline supports design, bug, and task", id, shard.Type)
 	}
 
 	// Check if pipeline already exists
@@ -89,7 +96,15 @@ func (c *Client) PipelineInit(ctx context.Context, id string) (*PipelineState, e
 		}
 	}
 
-	state := DefaultPipelineState()
+	// Determine starting phase from workflow config
+	repoRoot, _ := RepoForProject(c.Config.Project)
+	pCfg, _ := LoadPipelineConfig(repoRoot)
+	startPhase := "design"
+	if pCfg != nil {
+		startPhase = pCfg.StartPhaseForType(shard.Type)
+	}
+
+	state := DefaultPipelineState(startPhase)
 	stateJSON, err := json.Marshal(state)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal pipeline state: %v", err)
@@ -109,8 +124,9 @@ func (c *Client) PipelineGet(ctx context.Context, id string) (*PipelineState, er
 	if err != nil {
 		return nil, err
 	}
-	if shard.Type != "design" {
-		return nil, fmt.Errorf("shard %s is type %q, expected 'design'", id, shard.Type)
+	validTypes := map[string]bool{"design": true, "bug": true, "task": true}
+	if !validTypes[shard.Type] {
+		return nil, fmt.Errorf("shard %s is type %q — pipeline supports design, bug, and task", id, shard.Type)
 	}
 
 	if shard.Metadata == nil || len(shard.Metadata) <= 2 {

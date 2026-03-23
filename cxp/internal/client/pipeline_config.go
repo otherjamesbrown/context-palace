@@ -32,6 +32,12 @@ type PhaseConfig struct {
 	Gates []GateConfig `yaml:"gates,omitempty"`
 }
 
+// WorkflowConfig defines a pipeline path for a specific shard type.
+type WorkflowConfig struct {
+	Phases        []string       `yaml:"phases"`
+	ContextLayers []ContextLayer `yaml:"context_layers,omitempty"`
+}
+
 // ContextLayer defines a piece of context that can be injected into agent sessions.
 type ContextLayer struct {
 	Name   string `yaml:"name"`
@@ -54,8 +60,9 @@ type PipelineConfig struct {
 	Dispatch        DispatchCfg         `yaml:"dispatch,omitempty"`
 	Monitoring      MonitoringCfg       `yaml:"monitoring,omitempty"`
 	Review          ReviewCfg           `yaml:"review,omitempty"`
-	Context         ContextConfig       `yaml:"context,omitempty"`
-	GitHub          GitHubCfg           `yaml:"github,omitempty"`
+	Context         ContextConfig                `yaml:"context,omitempty"`
+	Workflows       map[string]WorkflowConfig   `yaml:"workflows,omitempty"`
+	GitHub          GitHubCfg                    `yaml:"github,omitempty"`
 	SkillsDir       string              `yaml:"skills_dir,omitempty"`
 	Phases          []PhaseConfig       `yaml:"phases,omitempty"`
 }
@@ -250,6 +257,7 @@ func MergePipelineConfig(base, override *PipelineConfig) *PipelineConfig {
 	out.Review = base.Review
 	out.GitHub = base.GitHub
 	out.SkillsDir = base.SkillsDir
+	out.Workflows = base.Workflows
 	out.Phases = copyPhases(base.Phases)
 
 	// Apply overrides — slices
@@ -264,6 +272,9 @@ func MergePipelineConfig(base, override *PipelineConfig) *PipelineConfig {
 	}
 	if override.Phases != nil {
 		out.Phases = copyPhases(override.Phases)
+	}
+	if override.Workflows != nil {
+		out.Workflows = override.Workflows
 	}
 
 	// Agents: merge maps
@@ -516,6 +527,42 @@ func (cfg *PipelineConfig) NextPhase(current string) string {
 	for i, name := range names {
 		if name == current && i+1 < len(names) {
 			return names[i+1]
+		}
+	}
+	return ""
+}
+
+// WorkflowForType returns the workflow config for a shard type.
+// Falls back to "design" workflow, then the full phase list.
+func (cfg *PipelineConfig) WorkflowForType(shardType string) *WorkflowConfig {
+	if cfg.Workflows != nil {
+		if wf, ok := cfg.Workflows[shardType]; ok {
+			return &wf
+		}
+		if wf, ok := cfg.Workflows["design"]; ok {
+			return &wf
+		}
+	}
+	// Default: all phases
+	names := cfg.PhaseNames()
+	return &WorkflowConfig{Phases: names}
+}
+
+// StartPhaseForType returns the first phase for a shard type's workflow.
+func (cfg *PipelineConfig) StartPhaseForType(shardType string) string {
+	wf := cfg.WorkflowForType(shardType)
+	if len(wf.Phases) > 0 {
+		return wf.Phases[0]
+	}
+	return "design"
+}
+
+// NextPhaseInWorkflow returns the next phase for a specific workflow.
+func (cfg *PipelineConfig) NextPhaseInWorkflow(shardType, current string) string {
+	wf := cfg.WorkflowForType(shardType)
+	for i, name := range wf.Phases {
+		if name == current && i+1 < len(wf.Phases) {
+			return wf.Phases[i+1]
 		}
 	}
 	return ""
