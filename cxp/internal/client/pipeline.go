@@ -454,11 +454,11 @@ func (c *Client) PipelineDecompose(ctx context.Context, designID, verdict string
 		// c. Validate integration test task exists (labeled "integration-test")
 		hasIntegrationTest := false
 		for _, te := range taskEdges {
-			shard, err := c.GetShard(ctx, te.ShardID)
+			detail, err := c.GetShardDetail(ctx, te.ShardID)
 			if err != nil {
 				continue
 			}
-			for _, label := range shard.Labels {
+			for _, label := range detail.Labels {
 				if label == "integration-test" {
 					hasIntegrationTest = true
 					break
@@ -591,5 +591,404 @@ func (c *Client) PipelineDecompose(ctx context.Context, designID, verdict string
 		TaskCount:        taskCount,
 		Phase:            resultPhase,
 	}, nil
+}
+
+// PipelineGateResult holds the outcome of a generic pipeline gate operation.
+type PipelineGateResult struct {
+	DesignID      string `json:"design_id"`
+	GateName      string `json:"gate_name"`
+	Phase         string `json:"phase"`
+	Round         int    `json:"round"`
+	Verdict       string `json:"verdict"`
+	ReviewShardID string `json:"review_shard_id"`
+	NextPhase     string `json:"next_phase,omitempty"`
+}
+
+// isTableMissing returns true if the error indicates the table doesn't exist (migration not applied).
+func isTableMissing(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "does not exist") || strings.Contains(msg, "relation") || strings.Contains(msg, "table not found")
+}
+
+// PipelineGatePass is a generic gate method that records a verdict at any pipeline phase.
+// It creates a review sub-shard, records to DB tables (if available), updates shard metadata,
+// and advances the phase on pass.
+func (c *Client) PipelineGatePass(ctx context.Context, designID, gateName, verdict, body string, readiness int, cfg *PipelineConfig) (*PipelineGateResult, error) {
+	// 1. Get pipeline state — determine current phase
+	state, err := c.PipelineGet(ctx, designID)
+	if err != nil {
+		return nil, err
+	}
+	currentPhase := state.Phase
+
+	// 2. Find gate config (optional — allow gate even if not configured)
+	var gateConfig *GateConfig
+	if cfg != nil {
+		gateConfig = cfg.FindGate(currentPhase, gateName)
+	}
+
+	// 3. If verdict is "pass" and gate has RequiresLabel, check child tasks
+	if verdict == "pass" && gateConfig != nil && gateConfig.RequiresLabel != "" {
+		edges, err := c.GetShardEdges(ctx, designID, "incoming", []string{"child-of"})
+		if err != nil {
+			return nil, fmt.Errorf("failed to get child edges: %v", err)
+		}
+		hasLabel := false
+		for _, e := range edges {
+			if e.Type == "task" {
+				detail, err := c.GetShardDetail(ctx, e.ShardID)
+				if err != nil {
+					continue
+				}
+				for _, label := range detail.Labels {
+					if label == gateConfig.RequiresLabel {
+						hasLabel = true
+						break
+					}
+				}
+				if hasLabel {
+					break
+				}
+			}
+		}
+		if !hasLabel {
+			return nil, fmt.Errorf("cannot pass gate %q: no child task with required label %q found", gateName, gateConfig.RequiresLabel)
+		}
+	}
+
+	// 4. Try to get/create pipeline_run from DB (graceful if table missing)
+	var pipelineID string
+	dbAvailable := true
+	pipelineRun, err := c.GetPipelineRun(ctx, designID)
+	if err != nil {
+		if isTableMissing(err) {
+			dbAvailable = false
+		} else if strings.Contains(err.Error(), "no pipeline run found") {
+			// Create a new pipeline run
+			shard, shardErr := c.GetShard(ctx, designID)
+			project := ""
+			if shardErr == nil {
+				project = shard.Project
+			}
+			pipelineRun, err = c.CreatePipelineRun(ctx, designID, project, currentPhase)
+			if err != nil {
+				if isTableMissing(err) {
+					dbAvailable = false
+				} else {
+					return nil, fmt.Errorf("failed to create pipeline run: %v", err)
+				}
+			}
+		} else {
+			return nil, fmt.Errorf("failed to get pipeline run: %v", err)
+		}
+	}
+	if pipelineRun != nil {
+		pipelineID = pipelineRun.ID
+	}
+
+	// 5. Compute round
+	round := 1
+	if dbAvailable && pipelineID != "" {
+		latestRound, err := c.GetLatestGateRound(ctx, pipelineID, gateName)
+		if err != nil {
+			if isTableMissing(err) {
+				dbAvailable = false
+			}
+			// fall through with round=1
+		} else {
+			round = latestRound + 1
+		}
+	} else {
+		// Fall back to shard metadata for round
+		if state.Review != nil && gateName == "readiness-review" {
+			round = state.Review.Round + 1
+		} else if state.Decompose != nil && gateName == "decomposition-review" {
+			round = state.Decompose.Round + 1
+		}
+		// For unknown gates without DB, start at round 1
+	}
+
+	// 6. Create review sub-shard
+	now := time.Now().UTC()
+	timestamp := now.Format(time.RFC3339)
+	verdictUpper := "FAIL"
+	if verdict == "pass" {
+		verdictUpper = "PASS"
+	}
+
+	content := fmt.Sprintf("# Gate: %s — Round %d\n\n**Design:** %s\n**Reviewer:** %s\n**Timestamp:** %s\n**Verdict:** %s\n",
+		gateName, round, designID, c.Config.Agent, timestamp, verdictUpper)
+	if readiness > 0 {
+		content += fmt.Sprintf("**Readiness Score:** %d/5\n", readiness)
+	}
+	content += fmt.Sprintf("\n## Findings\n\n%s", body)
+
+	title := fmt.Sprintf("Gate: %s — Round %d — %s", gateName, round, verdictUpper)
+	metaMap := map[string]any{
+		"design_id": designID,
+		"gate_name": gateName,
+		"round":     round,
+		"verdict":   verdict,
+	}
+	if readiness > 0 {
+		metaMap["readiness"] = readiness
+	}
+	meta, _ := json.Marshal(metaMap)
+	reviewID, err := c.CreateShardWithMetadata(ctx, title, content, "review", nil, []string{gateName}, json.RawMessage(meta))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gate review shard: %v", err)
+	}
+
+	// Create child-of edge
+	if err := c.CreateEdgeSimple(ctx, reviewID, designID, "child-of"); err != nil {
+		return nil, fmt.Errorf("failed to create edge: %v", err)
+	}
+
+	// 7. Record gate in DB (skip gracefully if table doesn't exist)
+	if dbAvailable && pipelineID != "" {
+		var readinessPtr *int
+		if readiness > 0 {
+			readinessPtr = &readiness
+		}
+		var bodyPtr *string
+		if body != "" {
+			bodyPtr = &body
+		}
+		reviewer := c.Config.Agent
+		_, err := c.RecordGate(ctx, PipelineGateInput{
+			PipelineID:     pipelineID,
+			DesignID:       designID,
+			GateName:       gateName,
+			Phase:          currentPhase,
+			Verdict:        verdict,
+			Reviewer:       &reviewer,
+			ReadinessScore: readinessPtr,
+			Body:           bodyPtr,
+			ReviewShardID:  &reviewID,
+		})
+		if err != nil && !isTableMissing(err) {
+			return nil, fmt.Errorf("failed to record gate in DB: %v", err)
+		}
+	}
+
+	// 8. Dual-write to shard metadata for backward compat
+	gateState := map[string]any{
+		"round":        round,
+		"last_verdict": verdict,
+		"last_shard":   reviewID,
+		"history": append(func() []map[string]any {
+			// Try to read existing history from metadata
+			return nil
+		}(), map[string]any{
+			"round":     round,
+			"verdict":   verdict,
+			"shard_id":  reviewID,
+			"timestamp": timestamp,
+		}),
+	}
+
+	// Read existing gate history from metadata
+	if state.Review != nil && gateName == "readiness-review" {
+		existing := make([]map[string]any, 0, len(state.Review.History))
+		for _, h := range state.Review.History {
+			existing = append(existing, map[string]any{
+				"round":     h.Round,
+				"verdict":   h.Verdict,
+				"shard_id":  h.ShardID,
+				"timestamp": h.Timestamp,
+			})
+		}
+		gateState["history"] = append(existing, map[string]any{
+			"round":     round,
+			"verdict":   verdict,
+			"shard_id":  reviewID,
+			"timestamp": timestamp,
+		})
+	} else if state.Decompose != nil && gateName == "decomposition-review" {
+		existing := make([]map[string]any, 0, len(state.Decompose.History))
+		for _, h := range state.Decompose.History {
+			existing = append(existing, map[string]any{
+				"round":      h.Round,
+				"verdict":    h.Verdict,
+				"shard_id":   h.ShardID,
+				"task_count": h.TaskCount,
+				"timestamp":  h.Timestamp,
+			})
+		}
+		gateState["history"] = append(existing, map[string]any{
+			"round":     round,
+			"verdict":   verdict,
+			"shard_id":  reviewID,
+			"timestamp": timestamp,
+		})
+	}
+
+	gateJSON, err := json.Marshal(gateState)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal gate state: %v", err)
+	}
+	if _, err := c.SetMetadataPath(ctx, designID, []string{"pipeline", gateName}, gateJSON); err != nil {
+		return nil, fmt.Errorf("failed to update gate metadata: %v", err)
+	}
+
+	// Also write backward-compat fields for known gates
+	if gateName == "readiness-review" {
+		reviewState := &ReviewState{
+			Round:           round,
+			LastVerdict:     verdict,
+			LastReviewShard: reviewID,
+			History: append(func() []ReviewHistoryEntry {
+				if state.Review != nil {
+					return state.Review.History
+				}
+				return nil
+			}(), ReviewHistoryEntry{
+				Round:     round,
+				Verdict:   verdict,
+				ShardID:   reviewID,
+				Timestamp: timestamp,
+			}),
+		}
+		reviewJSON, _ := json.Marshal(reviewState)
+		c.SetMetadataPath(ctx, designID, []string{"pipeline", "review"}, reviewJSON)
+	} else if gateName == "decomposition-review" {
+		decomposeState := &DecomposeState{
+			Round:              round,
+			LastVerdict:        verdict,
+			LastDecomposeShard: reviewID,
+			History: append(func() []DecomposeHistoryEntry {
+				if state.Decompose != nil {
+					return state.Decompose.History
+				}
+				return nil
+			}(), DecomposeHistoryEntry{
+				Round:     round,
+				Verdict:   verdict,
+				ShardID:   reviewID,
+				Timestamp: timestamp,
+			}),
+		}
+		decomposeJSON, _ := json.Marshal(decomposeState)
+		c.SetMetadataPath(ctx, designID, []string{"pipeline", "decompose"}, decomposeJSON)
+	}
+
+	// 9. If pass, determine next phase and advance
+	nextPhase := ""
+	resultPhase := currentPhase
+	if verdict == "pass" {
+		if cfg != nil {
+			nextPhase = cfg.NextPhase(currentPhase)
+		}
+		if nextPhase == "" {
+			// Fallback for known gates
+			switch gateName {
+			case "readiness-review":
+				nextPhase = "decompose"
+			case "decomposition-review":
+				nextPhase = "implement"
+			}
+		}
+		if nextPhase != "" {
+			// Update via shard metadata
+			_, err := c.PipelineUpdate(ctx, designID, &nextPhase, nil, nil, nil)
+			if err != nil {
+				return nil, fmt.Errorf("failed to advance phase: %v", err)
+			}
+			resultPhase = nextPhase
+			// Update via pipeline_runs table
+			if dbAvailable && pipelineID != "" {
+				_ = c.UpdatePipelineRunPhase(ctx, designID, nextPhase)
+			}
+		}
+	}
+
+	return &PipelineGateResult{
+		DesignID:      designID,
+		GateName:      gateName,
+		Phase:         resultPhase,
+		Round:         round,
+		Verdict:       verdict,
+		ReviewShardID: reviewID,
+		NextPhase:     nextPhase,
+	}, nil
+}
+
+// PipelineAuditEntry represents a single entry in the pipeline audit trail.
+type PipelineAuditEntry struct {
+	Timestamp     time.Time `json:"timestamp"`
+	GateName      string    `json:"gate_name"`
+	Round         int       `json:"round"`
+	Verdict       string    `json:"verdict"`
+	ReviewShardID string    `json:"review_shard_id"`
+	Body          string    `json:"body,omitempty"`
+}
+
+// PipelineAudit retrieves the audit trail for a design, trying the DB first,
+// falling back to shard metadata.
+func (c *Client) PipelineAudit(ctx context.Context, designID string) ([]PipelineAuditEntry, error) {
+	// Try table mode first
+	records, err := c.GetGateHistory(ctx, designID)
+	if err == nil && len(records) > 0 {
+		entries := make([]PipelineAuditEntry, len(records))
+		for i, r := range records {
+			body := ""
+			if r.Body != nil {
+				body = *r.Body
+			}
+			shardID := ""
+			if r.ReviewShardID != nil {
+				shardID = *r.ReviewShardID
+			}
+			entries[i] = PipelineAuditEntry{
+				Timestamp:     r.CreatedAt,
+				GateName:      r.GateName,
+				Round:         r.Round,
+				Verdict:       r.Verdict,
+				ReviewShardID: shardID,
+				Body:          body,
+			}
+		}
+		return entries, nil
+	}
+
+	// Fallback: read from shard metadata
+	state, err := c.PipelineGet(ctx, designID)
+	if err != nil {
+		return nil, err
+	}
+
+	var entries []PipelineAuditEntry
+
+	if state.Review != nil {
+		for _, h := range state.Review.History {
+			ts, _ := time.Parse(time.RFC3339, h.Timestamp)
+			entries = append(entries, PipelineAuditEntry{
+				Timestamp:     ts,
+				GateName:      "readiness-review",
+				Round:         h.Round,
+				Verdict:       h.Verdict,
+				ReviewShardID: h.ShardID,
+			})
+		}
+	}
+
+	if state.Decompose != nil {
+		for _, h := range state.Decompose.History {
+			ts, _ := time.Parse(time.RFC3339, h.Timestamp)
+			entries = append(entries, PipelineAuditEntry{
+				Timestamp:     ts,
+				GateName:      "decomposition-review",
+				Round:         h.Round,
+				Verdict:       h.Verdict,
+				ReviewShardID: h.ShardID,
+				Body:          fmt.Sprintf("%d tasks", h.TaskCount),
+			})
+		}
+	}
+
+	return entries, nil
 }
 

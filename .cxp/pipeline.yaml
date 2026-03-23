@@ -1,4 +1,4 @@
-# Pipeline configuration for penfold
+# Pipeline configuration for context-palace
 # See: cxp pipeline setup --help
 
 build:
@@ -21,3 +21,21 @@ dispatch:
 github:
     owner_repo: otherjamesbrown/context-palace
 skills_dir: skills
+
+# Pipeline phases and gates
+# Add a phase by adding an entry here + writing a skill file
+phases:
+    - name: design
+      gates:
+          - name: readiness-review
+            skill: m-readiness-check
+            fields:
+                readiness: {type: int, min: 1, max: 5, required: true}
+    - name: decompose
+      gates:
+          - name: decomposition-review
+            skill: m-decomposition-review
+            requires_label: integration-test
+    - name: implement
+    - name: review
+    - name: done

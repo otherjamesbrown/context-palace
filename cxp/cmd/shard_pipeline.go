@@ -271,6 +271,131 @@ var shardPipelineLockCheckCmd = &cobra.Command{
 	},
 }
 
+var shardPipelineGateCmd = &cobra.Command{
+	Use:   "gate <design-id> <gate-name>",
+	Short: "Record a pipeline gate verdict",
+	Long:  "Generic gate command for recording review verdicts at any pipeline phase.",
+	Args:  cobra.ExactArgs(2),
+	Example: `  cxp shard pipeline gate pf-design-123 readiness-review --verdict pass --readiness 4 --body "All criteria met."
+  cxp shard pipeline gate pf-design-123 custom-gate --verdict fail --body-file notes.md`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		designID := args[0]
+		gateName := args[1]
+
+		verdict, _ := cmd.Flags().GetString("verdict")
+		body, _ := cmd.Flags().GetString("body")
+		bodyFile, _ := cmd.Flags().GetString("body-file")
+		readiness, _ := cmd.Flags().GetInt("readiness")
+
+		// Validate verdict
+		if verdict == "" {
+			return fmt.Errorf("--verdict is required")
+		}
+		if verdict != "pass" && verdict != "fail" {
+			return fmt.Errorf("--verdict must be 'pass' or 'fail', got %q", verdict)
+		}
+
+		// Resolve body content
+		content, err := resolveBody(body, bodyFile)
+		if err != nil {
+			return err
+		}
+
+		// Load pipeline config
+		repoRoot := findRepoRoot()
+		pCfg, err := client.LoadPipelineConfig(repoRoot)
+		if err != nil {
+			pCfg = client.DefaultPipelineConfig()
+		}
+
+		result, err := cpClient.PipelineGatePass(ctx, designID, gateName, verdict, content, readiness, pCfg)
+		if err != nil {
+			return err
+		}
+
+		if outputFormat == "json" {
+			s, _ := client.FormatJSON(result)
+			fmt.Println(s)
+			return nil
+		}
+
+		fmt.Printf("Recorded gate %q for %s\n", result.GateName, result.DesignID)
+		fmt.Printf("  Review shard: %s\n", result.ReviewShardID)
+		fmt.Printf("  Round:        %d\n", result.Round)
+		fmt.Printf("  Verdict:      %s\n", result.Verdict)
+		if result.NextPhase != "" {
+			fmt.Printf("  Phase:        %s → %s\n", result.Phase, result.NextPhase)
+		} else {
+			fmt.Printf("  Phase:        %s\n", result.Phase)
+		}
+		return nil
+	},
+}
+
+var shardPipelineAuditCmd = &cobra.Command{
+	Use:     "audit <design-id>",
+	Short:   "Show pipeline audit trail",
+	Args:    cobra.ExactArgs(1),
+	Example: `  cxp shard pipeline audit pf-design-123`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		designID := args[0]
+
+		entries, err := cpClient.PipelineAudit(ctx, designID)
+		if err != nil {
+			return err
+		}
+
+		if outputFormat == "json" {
+			s, _ := client.FormatJSON(entries)
+			fmt.Println(s)
+			return nil
+		}
+
+		// Get design shard for title and phase
+		state, stateErr := cpClient.PipelineGet(ctx, designID)
+		shard, shardErr := cpClient.GetShard(ctx, designID)
+
+		title := designID
+		if shardErr == nil {
+			title = shard.Title
+		}
+		phase := "unknown"
+		status := "unknown"
+		if stateErr == nil {
+			phase = state.Phase
+			status = "active"
+		}
+
+		fmt.Printf("%s: %s\n", designID, title)
+		fmt.Printf("Phase: %s | Status: %s\n", phase, status)
+		fmt.Println()
+
+		if len(entries) == 0 {
+			fmt.Println("No gate records found.")
+			return nil
+		}
+
+		fmt.Println("TIMELINE")
+		for _, e := range entries {
+			verdictUpper := strings.ToUpper(e.Verdict)
+			ts := e.Timestamp.Format("2006-01-02 15:04")
+			fmt.Printf("  %s  %-22s  Round %d  %-4s   %s\n",
+				ts, e.GateName, e.Round, verdictUpper, e.ReviewShardID)
+			if e.Body != "" {
+				bodyPreview := e.Body
+				if len(bodyPreview) > 100 {
+					bodyPreview = bodyPreview[:100] + "..."
+				}
+				fmt.Printf("    %s\n", bodyPreview)
+			}
+		}
+
+		return nil
+	},
+}
+
 var shardPipelineReviewCmd = &cobra.Command{
 	Use:   "review <design-id>",
 	Short: "Record Phase 1 readiness review verdict",
@@ -305,7 +430,14 @@ var shardPipelineReviewCmd = &cobra.Command{
 			return err
 		}
 
-		result, err := cpClient.PipelineReview(ctx, designID, verdict, readiness, content)
+		// Load pipeline config and delegate to generic gate
+		repoRoot := findRepoRoot()
+		pCfg, err := client.LoadPipelineConfig(repoRoot)
+		if err != nil {
+			pCfg = client.DefaultPipelineConfig()
+		}
+
+		result, err := cpClient.PipelineGatePass(ctx, designID, "readiness-review", verdict, content, readiness, pCfg)
 		if err != nil {
 			return err
 		}
@@ -321,9 +453,12 @@ var shardPipelineReviewCmd = &cobra.Command{
 		fmt.Printf("  Round:        %d\n", result.Round)
 		phaseTransition := result.Phase
 		if result.Verdict == "pass" {
-			phaseTransition = "design → decompose"
+			phaseTransition = fmt.Sprintf("%s → %s", result.Phase, result.NextPhase)
+			if result.NextPhase == "" {
+				phaseTransition = "design → decompose"
+			}
 		}
-		fmt.Printf("  Verdict:      %s (%d/5)\n", result.Verdict, result.Readiness)
+		fmt.Printf("  Verdict:      %s (%d/5)\n", result.Verdict, readiness)
 		fmt.Printf("  Phase:        %s\n", phaseTransition)
 		return nil
 	},
@@ -357,7 +492,14 @@ var shardPipelineDecomposeCmd = &cobra.Command{
 			return err
 		}
 
-		result, err := cpClient.PipelineDecompose(ctx, designID, verdict, content)
+		// Load pipeline config and delegate to generic gate
+		repoRoot := findRepoRoot()
+		pCfg, err := client.LoadPipelineConfig(repoRoot)
+		if err != nil {
+			pCfg = client.DefaultPipelineConfig()
+		}
+
+		result, err := cpClient.PipelineGatePass(ctx, designID, "decomposition-review", verdict, content, 0, pCfg)
 		if err != nil {
 			return err
 		}
@@ -370,13 +512,15 @@ var shardPipelineDecomposeCmd = &cobra.Command{
 
 		phaseTransition := result.Phase
 		if result.Verdict == "pass" {
-			phaseTransition = "decompose → implement"
+			phaseTransition = fmt.Sprintf("%s → %s", result.Phase, result.NextPhase)
+			if result.NextPhase == "" {
+				phaseTransition = "decompose → implement"
+			}
 		}
 		fmt.Printf("Recorded Phase 2 decomposition for %s\n", result.DesignID)
-		fmt.Printf("  Decompose shard: %s\n", result.DecomposeShardID)
+		fmt.Printf("  Decompose shard: %s\n", result.ReviewShardID)
 		fmt.Printf("  Round:           %d\n", result.Round)
 		fmt.Printf("  Verdict:         %s\n", result.Verdict)
-		fmt.Printf("  Tasks:           %d\n", result.TaskCount)
 		fmt.Printf("  Phase:           %s\n", phaseTransition)
 		return nil
 	},
@@ -388,6 +532,13 @@ func init() {
 	shardPipelineUpdateCmd.Flags().String("waiting-for", "", "JSON array of shard IDs to wait for")
 	shardPipelineUpdateCmd.Flags().String("add-task", "", "Shard ID to append to task_shards")
 	shardPipelineUpdateCmd.Flags().Int("tokens", 0, "Token count to add to cumulative_tokens")
+
+	// pipeline gate flags
+	shardPipelineGateCmd.Flags().String("verdict", "", "Gate verdict: 'pass' or 'fail' (required)")
+	shardPipelineGateCmd.Flags().String("body", "", "Findings text")
+	shardPipelineGateCmd.Flags().String("body-file", "", "Read findings from file")
+	shardPipelineGateCmd.Flags().Int("readiness", 0, "Optional readiness score")
+	_ = shardPipelineGateCmd.MarkFlagRequired("verdict")
 
 	// pipeline review flags
 	shardPipelineReviewCmd.Flags().String("verdict", "", "Review verdict: 'pass' or 'fail' (required)")
@@ -415,6 +566,8 @@ func init() {
 	shardPipelineCmd.AddCommand(shardPipelineLockCheckCmd)
 	shardPipelineCmd.AddCommand(shardPipelineReviewCmd)
 	shardPipelineCmd.AddCommand(shardPipelineDecomposeCmd)
+	shardPipelineCmd.AddCommand(shardPipelineGateCmd)
+	shardPipelineCmd.AddCommand(shardPipelineAuditCmd)
 
 	shardCmd.AddCommand(shardPipelineCmd)
 }

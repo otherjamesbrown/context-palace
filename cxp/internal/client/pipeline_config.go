@@ -8,6 +8,28 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// GateFieldConfig describes a single field within a gate.
+type GateFieldConfig struct {
+	Type     string `yaml:"type"`
+	Min      *int   `yaml:"min,omitempty"`
+	Max      *int   `yaml:"max,omitempty"`
+	Required bool   `yaml:"required,omitempty"`
+}
+
+// GateConfig describes a quality gate within a pipeline phase.
+type GateConfig struct {
+	Name          string                     `yaml:"name"`
+	Skill         string                     `yaml:"skill,omitempty"`
+	Fields        map[string]GateFieldConfig `yaml:"fields,omitempty"`
+	RequiresLabel string                     `yaml:"requires_label,omitempty"`
+}
+
+// PhaseConfig describes a pipeline phase and its gates.
+type PhaseConfig struct {
+	Name  string       `yaml:"name"`
+	Gates []GateConfig `yaml:"gates,omitempty"`
+}
+
 // PipelineConfig holds pipeline configuration loaded from YAML files.
 type PipelineConfig struct {
 	Build           []string            `yaml:"build,omitempty"`
@@ -17,6 +39,7 @@ type PipelineConfig struct {
 	Dispatch        DispatchCfg         `yaml:"dispatch,omitempty"`
 	GitHub          GitHubCfg           `yaml:"github,omitempty"`
 	SkillsDir       string              `yaml:"skills_dir,omitempty"`
+	Phases          []PhaseConfig       `yaml:"phases,omitempty"`
 }
 
 // AgentCfg defines an agent's domain capabilities.
@@ -128,6 +151,7 @@ func MergePipelineConfig(base, override *PipelineConfig) *PipelineConfig {
 	out.Dispatch = base.Dispatch
 	out.GitHub = base.GitHub
 	out.SkillsDir = base.SkillsDir
+	out.Phases = copyPhases(base.Phases)
 
 	// Apply overrides — slices
 	if override.Build != nil {
@@ -138,6 +162,9 @@ func MergePipelineConfig(base, override *PipelineConfig) *PipelineConfig {
 	}
 	if override.CompletionSteps != nil {
 		out.CompletionSteps = copyStrings(override.CompletionSteps)
+	}
+	if override.Phases != nil {
+		out.Phases = copyPhases(override.Phases)
 	}
 
 	// Agents: merge maps
@@ -288,4 +315,62 @@ func copyAgents(m map[string]AgentCfg) map[string]AgentCfg {
 		out[k] = v
 	}
 	return out
+}
+
+func copyPhases(p []PhaseConfig) []PhaseConfig {
+	if p == nil {
+		return nil
+	}
+	out := make([]PhaseConfig, len(p))
+	copy(out, p)
+	return out
+}
+
+// PhaseNames returns the phase names from config, falling back to
+// ValidPipelinePhases if Phases is empty.
+func (cfg *PipelineConfig) PhaseNames() []string {
+	if len(cfg.Phases) == 0 {
+		return ValidPipelinePhases
+	}
+	names := make([]string, len(cfg.Phases))
+	for i, p := range cfg.Phases {
+		names[i] = p.Name
+	}
+	return names
+}
+
+// FindPhase finds a phase by name. Returns nil if not found.
+func (cfg *PipelineConfig) FindPhase(name string) *PhaseConfig {
+	for i := range cfg.Phases {
+		if cfg.Phases[i].Name == name {
+			return &cfg.Phases[i]
+		}
+	}
+	return nil
+}
+
+// FindGate finds a gate within a phase. Returns nil if not found.
+func (cfg *PipelineConfig) FindGate(phaseName, gateName string) *GateConfig {
+	phase := cfg.FindPhase(phaseName)
+	if phase == nil {
+		return nil
+	}
+	for i := range phase.Gates {
+		if phase.Gates[i].Name == gateName {
+			return &phase.Gates[i]
+		}
+	}
+	return nil
+}
+
+// NextPhase returns the next phase name after current, or "" if current is
+// the last phase or not found.
+func (cfg *PipelineConfig) NextPhase(current string) string {
+	names := cfg.PhaseNames()
+	for i, name := range names {
+		if name == current && i+1 < len(names) {
+			return names[i+1]
+		}
+	}
+	return ""
 }
