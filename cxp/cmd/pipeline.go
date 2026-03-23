@@ -38,28 +38,62 @@ For each trigger, spawns an M session in a tmux window (unless --dry-run).`,
 		once, _ := cmd.Flags().GetBool("once")
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 
+		allProjects, _ := cmd.Flags().GetBool("all-projects")
+
 		if interval < 1 {
 			interval = 30
 		}
 
-		// Resolve repo from registry, falling back to cwd
-		repoRoot, err := client.RepoForProject(cpClient.Config.Project)
-		if err != nil {
-			// Fall back to git repo root or cwd
-			repoRoot = findRepoRoot()
-			fmt.Fprintf(os.Stderr, "[poller] No repo registered for project %q, using %s\n", cpClient.Config.Project, repoRoot)
-			fmt.Fprintf(os.Stderr, "[poller] Run `cxp pipeline setup` in the repo to register it.\n")
+		// Build list of projects to poll
+		type projectEntry struct {
+			name    string
+			root    string
+			config  *client.PipelineConfig
 		}
+		var projects []projectEntry
 
-		// Load pipeline config for this repo
-		pipelineCfg, cfgErr := client.LoadPipelineConfig(repoRoot)
-		if cfgErr != nil {
-			pipelineCfg = client.DefaultPipelineConfig()
+		if allProjects {
+			reg, err := client.LoadRepoRegistry()
+			if err != nil {
+				return fmt.Errorf("failed to load repo registry: %v", err)
+			}
+			for name, entry := range reg.Repos {
+				cfg, _ := client.LoadPipelineConfig(entry.Path)
+				if cfg == nil {
+					cfg = client.DefaultPipelineConfig()
+				}
+				projects = append(projects, projectEntry{name: name, root: entry.Path, config: cfg})
+			}
+			if len(projects) == 0 {
+				return fmt.Errorf("no projects registered. Run `cxp pipeline setup` in each repo.")
+			}
+			fmt.Printf("[poller] Polling %d projects: ", len(projects))
+			for i, p := range projects {
+				if i > 0 { fmt.Print(", ") }
+				fmt.Print(p.name)
+			}
+			fmt.Println()
+		} else {
+			repoRoot, err := client.RepoForProject(cpClient.Config.Project)
+			if err != nil {
+				repoRoot = findRepoRoot()
+				fmt.Fprintf(os.Stderr, "[poller] No repo registered for project %q, using %s\n", cpClient.Config.Project, repoRoot)
+			}
+			cfg, cfgErr := client.LoadPipelineConfig(repoRoot)
+			if cfgErr != nil {
+				cfg = client.DefaultPipelineConfig()
+			}
+			projects = append(projects, projectEntry{name: cpClient.Config.Project, root: repoRoot, config: cfg})
 		}
 
 		for {
-			runTriggerChecks(ctx, repoRoot, pipelineCfg, dryRun)
-			runHealthChecks(ctx, repoRoot, pipelineCfg, dryRun)
+			for _, p := range projects {
+				if len(projects) > 1 {
+					fmt.Printf("[%s] ", p.name)
+				}
+				runTriggerChecks(ctx, p.root, p.config, dryRun)
+				runHealthChecks(ctx, p.root, p.config, dryRun)
+			}
 			if once {
 				break
 			}
@@ -397,6 +431,7 @@ func init() {
 	pipelinePollerCmd.Flags().Int("interval", 30, "Polling interval in seconds")
 	pipelinePollerCmd.Flags().Bool("once", false, "Run one check cycle and exit")
 	pipelinePollerCmd.Flags().Bool("dry-run", false, "Print what would be spawned without executing")
+	pipelinePollerCmd.Flags().Bool("all-projects", false, "Poll all registered projects from ~/.cxp/repos.yaml")
 
 	pipelineCmd.AddCommand(pipelinePollerCmd)
 	rootCmd.AddCommand(pipelineCmd)
