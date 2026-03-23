@@ -47,10 +47,25 @@ Does the design:
    - User/consumer identified?
    - Success criteria defined?
    - Scope boundaries set?
-2. If gaps found: append a readiness challenge to the design shard listing what's missing. Set label `blocked`. Exit.
-3. Run implementability check: "Could an implementing agent write code from this design without asking James any questions?"
-4. If YES: `cxp shard pipeline update <id> --phase decompose`. Exit.
-5. If NO: append what's missing to the design shard. Set label `blocked`. Exit.
+2. **Always append findings to the shard** — even when everything passes. This is the audit trail.
+   ```bash
+   cxp shard append <id> --body "## Phase 1: Readiness Check
+   *Reviewed by M at <timestamp>*
+   ### Readiness (N/5)
+   1. Links to outcome: PASS/FAIL — <detail>
+   2. Problem stated: PASS/FAIL — <detail>
+   3. User identified: PASS/FAIL — <detail>
+   4. Success criteria: PASS/FAIL — <detail>
+   5. Scope boundaries: PASS/FAIL — <detail>
+   ### Implementability Check
+   PASS/FAIL — <detail>
+   ### Verdict
+   <outcome>"
+   ```
+3. If gaps found: set label `blocked`. Exit.
+4. Run implementability check: "Could an implementing agent write code from this design without asking James any questions?"
+5. If YES: `cxp shard pipeline update <id> --phase decompose`. Exit.
+6. If NO: set label `blocked`. Exit.
 
 ### Full C/D/S path
 
