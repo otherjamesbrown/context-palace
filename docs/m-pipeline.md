@@ -1,79 +1,105 @@
-# M Pipeline — Automated Design-to-Delivery
+# M Pipeline
 
-M Pipeline turns designs into working code by orchestrating agents through a structured pipeline with enforced stage gates: design review, decomposition with integration tests, dispatch, implement, review, merge. M is an ephemeral orchestrator — it reads shard state, takes one action, updates state, and exits. Kill it anytime; the next M picks up.
+M Pipeline turns designs into working code by orchestrating agents through a structured pipeline with enforced stage gates. M is an ephemeral orchestrator -- it reads shard state, takes one action, updates state, and exits. Kill it anytime; the next M picks up from the shard.
 
-## Status
+## Quick Start
 
-**v1 implemented** (2026-03-22), **stage gates added** (2026-03-23).
+### 1. Register a repo
 
-- [PR #1](https://github.com/otherjamesbrown/context-palace/pull/1) — Core pipeline: commands, poller, skills
-- [PR #2](https://github.com/otherjamesbrown/context-palace/pull/2) — Per-repo config and registry system
+```bash
+cd ~/github/otherjamesbrown/penfold
+cxp pipeline setup
+```
 
-First real use: 6 penfold pipeline designs taken through Phase 1 (readiness review) and Phase 2 (decomposition with integration tests and cross-design ordering).
+Auto-detects language (Go, Node, Rust, Python), build/test commands, GitHub remote, and default branch. Creates `.cxp/pipeline.yaml` and registers the repo in `~/.cxp/repos.yaml`.
 
-## Key Shards
+Flags: `--project <name>`, `--force` (overwrite existing), `--dry-run`.
 
-| Shard | Type | Description |
-|-------|------|-------------|
-| `pf-a23493` | design | M Pipeline design document (the full spec) |
-| `pf-4bdd1e` | outcome | Automated AI-code creation pipeline (parent outcome) |
-| `pf-0ef956` | outcome | Reliable, data-driven content pipeline (penfold designs) |
-| `pf-ca054d` | outcome | futures - CoWork Style (research on Claude CoWork patterns) |
-| `pf-2b22a3` | knowledge | Cross-design review: 6 penfold pipeline designs |
-| `pf-f5c919` | design | Cross-design integration test (blocked by all 6 designs) |
+### 2. Copy skills into the repo
 
-## How It Works — The Full Pipeline
+```bash
+cxp pipeline init-skills
+```
 
-### Phase 1: Design Review (`design` → `decompose`)
+Copies default skill files from `~/.cxp/skills/` or the context-palace repo into the repo's `skills/` directory. Existing files are not overwritten unless `--force` is specified.
 
-An agent creates a design following `skills/create-design.md`. M evaluates it:
+### 3. Initialize a pipeline on a design
 
-1. **Readiness check** (5 criteria): links to outcome, problem stated, user identified, success criteria, scope boundaries
-2. **Implementability check**: could an agent code this without asking questions?
-3. **Record verdict** — creates audit trail automatically:
-   ```bash
-   cxp shard pipeline review <design-id> --verdict pass|fail --readiness <N> --body "<findings>"
-   ```
+```bash
+cxp shard pipeline init <design-id>
+```
+
+Sets `metadata.pipeline` on the design shard with phase=`design`, timestamps, and empty task list.
+
+### 4. Check status
+
+```bash
+cxp dashboard                          # high-level overview
+cxp shard pipeline show <design-id>    # pipeline state + lock + iterations
+cxp shard pipeline audit <design-id>   # full gate timeline
+cxp task deps <design-id>              # dependency graph with dispatch plan
+```
+
+### 5. Run the poller
+
+```bash
+cxp pipeline poller                     # current project, every 30s
+cxp pipeline poller --all-projects      # all registered repos
+cxp pipeline poller --once --dry-run    # one check, print only
+```
+
+---
+
+## Workflows
+
+Workflows define which phases a shard goes through. Configured in `pipeline.yaml` under `workflows:`.
+
+| Workflow | Phases | Use case |
+|----------|--------|----------|
+| `design` | design, decompose, implement, review, done | Full design-to-delivery |
+| `bug` | implement, review, done | Bug fixes (skip design/decompose) |
+| `task` | implement, review, done | Standalone tasks (skip design/decompose) |
+
+The pipeline resolves the workflow from the shard type. If no match, falls back to `design`, then the full phase list.
+
+---
+
+## Pipeline Phases
+
+### Phase 1: Design Review (`design` -> `decompose`)
+
+An agent evaluates the design against 5 readiness criteria and an implementability check.
+
+```bash
+cxp shard pipeline review <design-id> --verdict pass|fail --readiness <1-5> --body "<findings>"
+```
 
 The review command:
 - Creates a `review` sub-shard linked to the design (audit trail)
 - Updates pipeline metadata with structured verdict, round number, history
-- If pass: advances to `decompose`
-- If fail: stays in `design` — fix gaps and re-run
+- If pass: advances phase to `decompose`
+- If fail: stays in `design` for iteration
 
-Designs that fail get specific feedback. The process loops until they pass.
+Gate config drives this: the `readiness-review` gate references skill `m-readiness-check`, requires a `readiness` field (int, 1-5), and runs on model `haiku`.
 
-### Phase 2: Decomposition (`decompose` → `implement`)
+### Phase 2: Decomposition (`decompose` -> `implement`)
 
 A domain agent breaks the design into tasks:
 
-1. **Structure pass** — produce task tree with titles, scope, deps
-2. **Detail review** — verify each task is single-session sized, has testable criteria, code locations
-3. **Create tasks** with `cxp task create --parent <design-id>`
-4. **Create integration test task** (required) — labeled `integration-test`, blocked by all other tasks, converts design success criteria into concrete test cases
-5. **Decomposition review** — a separate agent validates the breakdown (right-sized? gaps? correct deps?)
-6. **Record verdict:**
-   ```bash
-   cxp shard pipeline decompose <design-id> --verdict pass|fail --body "<findings>"
-   ```
+1. Produce task tree with titles, scope, deps
+2. Create tasks with `cxp task create --parent <design-id>`
+3. Create an integration test task labeled `integration-test`, blocked by all other tasks
+4. Record verdict:
+
+```bash
+cxp shard pipeline decompose <design-id> --verdict pass|fail --body "<findings>"
+```
 
 The decompose gate validates:
 - At least one task exists
 - All tasks have substantive content
 - Dependencies are acyclic
-- **An integration test task with label `integration-test` exists**
-
-If validation fails, you get a specific error. Fix and retry.
-
-### Cross-Design Ordering
-
-When multiple designs touch the same codebase, use `blocked-by` edges between designs to enforce implementation order:
-
-```bash
-cxp shard link <later-design> --blocked-by <earlier-design>
-```
-
-Create a cross-design integration test design (blocked by all others) to verify they work together after independent implementation.
+- An integration test task with label `integration-test` exists (when `requires_label` is set in gate config)
 
 ### Phase 3: Implement (`implement`)
 
@@ -81,123 +107,591 @@ Tasks dispatched to agents in isolated worktrees:
 
 ```bash
 cxp task dispatch <task-id>              # single task
-cxp task dispatch-all <design-id>        # all ready tasks
 ```
 
-Each agent receives: task spec, design context, completion instructions (test, evidence, PR, needs-review).
+Dispatch checks blocker edges are satisfied, creates a worktree, generates a `CLAUDE.md` from context layers, spawns a Claude session in tmux, sets status to `in_progress`, records dispatch metadata, and captures session output via `tmux pipe-pane`.
 
 ### Phase 4: Review (`review`)
 
+Two strategies, configured per-repo:
+
+- **`agent`** -- a pipeline agent reviews the PR using the `review_skill` (e.g. `m-review-pr`)
+- **`external`** -- an external reviewer (e.g. Gemini) reviews, and a process skill (e.g. `m-process-pr-review`) evaluates the result
+
+After approval:
 ```bash
-cxp task review <task-id>                # spawn reviewer
-cxp task review-verdict <id> approve     # record verdict
-cxp task pr merge <task-id>              # squash merge, clean up
+cxp task pr merge <task-id>
 ```
 
 ### Phase 5: Done
 
-All tasks merged, integration tests pass, design closed.
+All tasks merged. A `retrospective` gate (skill `m-retrospective`, model `haiku`) can run to capture lessons learned.
 
-## Setup
+### Cross-Design Ordering
 
-### Register a repo
-
-```bash
-cd ~/github/otherjamesbrown/penfold
-cxp pipeline setup
-```
-
-Auto-detects language, build/test commands, GitHub remote. Creates `.cxp/pipeline.yaml` and updates `~/.cxp/repos.yaml`.
-
-### Initialize a pipeline
+When multiple designs touch the same codebase, use `blocked-by` edges between designs:
 
 ```bash
-cxp shard pipeline init <design-id>
+cxp shard link <later-design> --blocked-by <earlier-design>
 ```
 
-### Check status
+---
 
-```bash
-cxp dashboard                          # high-level overview
-cxp shard pipeline show <design-id>    # pipeline state + review history
-cxp task deps <design-id>              # dependency graph
+## Configurable Context Layers
+
+When `cxp task dispatch` runs, it generates a `CLAUDE.md` for the worktree by assembling context layers defined in `pipeline.yaml`.
+
+Each layer has:
+- **`name`** -- identifier
+- **`source`** -- where content comes from
+- **`when`** -- which mode activates the layer: `always`, `interactive`, `dispatch`, or `gate:<name>`
+
+### Source types
+
+| Source | Resolves to |
+|--------|-------------|
+| `file:<path>` | Read file from repo (relative to repo root) |
+| `shard:<id>` | Fetch shard content from Context Palace |
+| `skills:<name>` | Resolve skill file (repo then global) |
+| `skills-dir` | Load all `.md` files from skills directory (optional `filter` list) |
+| `claude-md` | Read the repo's `CLAUDE.md` |
+| `dispatch-prompt` | Injected task prompt (dispatch mode only) |
+| `parent-design` | Injected parent design content (dispatch mode only) |
+| `hook:<name>` | Deferred to Claude Code hooks |
+
+### Example: penfold context layers
+
+```yaml
+context:
+    layers:
+        - name: architecture
+          source: file:.cxp/context/architecture.md
+          when: always
+        - name: agent-identity
+          source: file:.cxp/context/agent-identity.md
+          when: interactive
+        - name: playbook
+          source: shard:pf-2b76b4
+          when: interactive
+        - name: task-prompt
+          source: dispatch-prompt
+          when: dispatch
+        - name: design-context
+          source: parent-design
+          when: dispatch
+        - name: dispatch-completion
+          source: file:.cxp/context/dispatch-completion.md
+          when: dispatch
 ```
 
-## Config Hierarchy (Claude Code pattern)
+When no layers are configured, dispatch mode injects the task prompt and parent design; interactive mode loads the repo `CLAUDE.md`.
 
+---
+
+## Per-Phase Model Selection
+
+Models are resolved with this priority: gate model > phase model > dispatch `default_model`.
+
+```yaml
+dispatch:
+    default_model: sonnet         # fallback for everything
+
+phases:
+    - name: design
+      model: haiku                # readiness checks are judgment
+      gates:
+          - name: readiness-review
+            model: haiku          # gate can override phase
+    - name: implement
+      model: sonnet               # code writing needs capability
+    - name: review
+      model: haiku                # reviewing is judgment
+
+monitoring:
+    model: haiku                  # health checks
+
+review:
+    model: haiku                  # PR review evaluation
 ```
-~/.cxp/pipeline.yaml          # global defaults
-<repo>/.cxp/pipeline.yaml     # repo overrides (wins)
 
-<repo>/skills/                 # repo-specific skills
-~/.cxp/skills/                 # global fallback skills
-```
+Use `cfg.ModelForPhase(phaseName, gateName)` in code. The model flag is appended to `claude_flags` at dispatch time.
 
-## Skills
-
-| Skill | Who uses it | Purpose |
-|-------|------------|---------|
-| `skills/create-design.md` | Any agent creating designs | Required structure, implementability test |
-| `skills/m-playbook.md` | M (orchestrator) | Decision trees, phase rules, commands |
-| `skills/m-readiness-check.md` | M | Phase 1 readiness + implementability evaluation |
-| `skills/m-implementability.md` | M | Implementability criteria reference |
-| `skills/m-dispatch-task.md` | M | Phase 3 task dispatch procedure |
-| `skills/m-review-pr.md` | M | Phase 4 PR review procedure |
-| `skills/m-merge-and-verify.md` | M | Phase 4 merge + post-merge verification |
-| `skills/m-stall-check.md` | M | Stall diagnosis for stuck agents |
-
-`create-design.md` and `m-readiness-check.md` are cross-referenced — the design skill tells authors what's required, the readiness check evaluates against the same criteria.
+---
 
 ## Stage Gates
 
-Every phase transition is enforced by a command that validates preconditions and creates an audit trail:
+Every phase transition is enforced by a gate command that validates preconditions and creates an audit trail.
 
-| Gate | Command | What it checks |
-|------|---------|---------------|
-| design → decompose | `cxp shard pipeline review` | 5 readiness criteria + implementability |
-| decompose → implement | `cxp shard pipeline decompose` | Tasks exist, have content, deps acyclic, integration test exists |
+### Built-in gates
 
-Both commands create sub-shards (type `review`) linked to the design. Pipeline metadata tracks round numbers and history. You cannot advance a phase without going through the gate.
+| Gate | Command | Phase transition | Checks |
+|------|---------|-----------------|--------|
+| `readiness-review` | `cxp shard pipeline review` | design -> decompose | 5 readiness criteria, implementability, readiness score 1-5 |
+| `decomposition-review` | `cxp shard pipeline decompose` | decompose -> implement | Tasks exist, have content, deps acyclic, integration-test label |
+
+### Generic gate
+
+```bash
+cxp shard pipeline gate <design-id> <gate-name> --verdict pass|fail --body "<findings>"
+```
+
+Works for any gate defined in config. Creates a review sub-shard, records the verdict, and advances the phase if pass.
+
+### Audit trail
+
+```bash
+cxp shard pipeline audit <design-id>
+```
+
+Shows timeline of all gate records: timestamp, gate name, round number, verdict, review shard ID, and body preview.
+
+Gate config supports:
+- `skill` -- which skill file the reviewing agent should follow
+- `model` -- model to use for the gate evaluation
+- `fields` -- structured fields with type validation (e.g. `readiness: {type: int, min: 1, max: 5, required: true}`)
+- `requires_label` -- a label that must exist on a child task (e.g. `integration-test`)
+
+---
+
+## Health Monitoring
+
+The poller runs health checks on every cycle alongside trigger checks.
+
+### Configuration
+
+```yaml
+monitoring:
+    stall_timeout: 30m
+    crash_check: true
+    max_retries: 3
+    cooldown: 5m
+    model: haiku
+    actions:
+        on_stall: skill:m-stall-check
+        on_crash: redispatch
+        on_max_retries: escalate
+```
+
+### Stall detection
+
+A task is stalled if status is `in_progress` and `updated_at` exceeds `stall_timeout`. Actions:
+
+| Action | Behavior |
+|--------|----------|
+| `skill:<name>` | Spawn M with the named skill to diagnose |
+| `redispatch` | Reset to open, remove worktree, re-dispatch |
+| `escalate` | Append note, label `blocked` |
+
+### Crash recovery
+
+A crash is detected when the tmux window for a task no longer exists. The action (usually `redispatch`) resets the task and re-dispatches. Retry count is tracked in `metadata.dispatch_retries`.
+
+When `max_retries` is exceeded, the `on_max_retries` action fires (usually `escalate`).
+
+---
+
+## Review Process
+
+### Strategy: external
+
+Used when an external service (e.g. Gemini) reviews PRs. Configure:
+
+```yaml
+review:
+    strategy: external
+    external_reviewers: [gemini]
+    process_skill: m-process-pr-review
+    ci:
+        mode: pr-only       # "pr-only", "all-pass", or "ignore"
+        wait: true           # wait for CI before reviewing
+```
+
+### Strategy: agent
+
+A pipeline agent reviews using a skill:
+
+```yaml
+review:
+    strategy: agent
+    review_skill: m-review-pr
+    review_agent: agent-mycroft
+    ci:
+        mode: ignore
+        wait: false
+```
+
+### CI modes
+
+| Mode | Behavior |
+|------|----------|
+| `pr-only` | Only check CI on the PR branch |
+| `all-pass` | All CI checks must pass before review |
+| `ignore` | Skip CI checks entirely |
+
+---
+
+## Auto-Deploy
+
+Configured per-repo. After a PR merge, changed paths are matched to services:
+
+```yaml
+deploy:
+    enabled: true
+    services:
+        - name: ai
+          paths: [services/ai/]
+          command: ./scripts/deploy.sh ai
+        - name: worker
+          paths: [services/worker/, pkg/]
+          command: ./scripts/deploy.sh worker
+```
+
+Each service has a name, a list of path prefixes that trigger it, and a deploy command.
+
+---
+
+## Post-Agent Completion
+
+`cxp task complete <task-id>` runs automatically after the agent exits (appended to the tmux shell command). Steps:
+
+1. Restore the original `CLAUDE.md` from main (undoes dispatch context injection)
+2. Commit any uncommitted changes (excluding `CLAUDE.md`)
+3. Push the branch
+4. Create a PR via `gh pr create` if one does not exist (stores `pr_url` in metadata)
+5. Append evidence to the shard (commit hash, files changed, PR URL)
+6. Mark the task `needs-review`
+
+If the task is already `needs-review`, it runs validation instead: checks for commits on the branch and a PR, auto-creating the PR if missing.
+
+---
+
+## Feedback Loop
+
+### Insights
+
+```bash
+cxp pipeline insights
+cxp pipeline insights --project penfold
+cxp pipeline insights -o json
+```
+
+Analyzes pipeline execution data and produces a report with:
+- **Overview** -- designs, tasks, PR counts
+- **Gate pass rates** -- first-try pass percentage per gate
+- **Common failure reasons** -- extracted from gate review bodies
+- **Agent performance** -- task completion, PR creation, timing
+- **Friction points** -- detected patterns
+- **Suggested improvements** -- data-driven recommendations
+
+### Improve
+
+```bash
+cxp pipeline improve
+cxp pipeline improve --apply
+cxp pipeline improve -o json
+```
+
+Analyzes patterns from insights data and proposes specific changes to skills, config, and process files. Detected patterns include:
+
+- Low readiness-review pass rate -> strengthen `create-design` skill
+- Missing model configuration -> add per-phase models
+- No monitoring configured -> add health check config
+- Missing integration test gate requirement -> add `requires_label`
+- Missing `CXP_DISPATCH` check in session hook -> add dispatch guard
+- Skills not initialized -> suggest `cxp pipeline init-skills`
+
+`--apply` auto-applies config/process changes (skill changes require human review).
+
+### Retrospective
+
+The `done` phase has a `retrospective` gate (skill `m-retrospective`, model `haiku`) for capturing lessons learned after a design is fully delivered.
+
+---
+
+## Portable Pipelines
+
+### init-skills
+
+```bash
+cxp pipeline init-skills
+cxp pipeline init-skills --force
+cxp pipeline init-skills --dry-run
+```
+
+Copies these skill files into the repo's skills directory:
+
+| Skill | Purpose |
+|-------|---------|
+| `create-design.md` | Design authoring guide (structure, implementability) |
+| `m-playbook.md` | M's decision trees, phase rules, commands |
+| `m-readiness-check.md` | Phase 1 readiness + implementability evaluation |
+| `m-implementability.md` | Implementability criteria reference |
+| `m-dispatch-task.md` | Phase 3 task dispatch procedure |
+| `m-review-pr.md` | Phase 4 PR review procedure (agent strategy) |
+| `m-process-pr-review.md` | Process external reviewer output |
+| `m-merge-and-verify.md` | Merge + post-merge verification |
+| `m-stall-check.md` | Stall diagnosis for stuck agents |
+| `m-retrospective.md` | Post-delivery retrospective |
+
+Source resolution: `~/.cxp/skills/` first, then context-palace `skills/` directory.
+
+### Config hierarchy
+
+```
+~/.cxp/pipeline.yaml          # global defaults
+<repo>/.cxp/pipeline.yaml     # repo overrides (wins on conflict)
+```
+
+Merge rules:
+- Slices (build, test, phases): override replaces entirely
+- Maps (agents): override keys replace, base keys kept
+- Scalars: override replaces if non-zero
+
+### Skill resolution
+
+When a skill is referenced (e.g. in a gate config), it resolves:
+1. `<repo>/<skills_dir>/<skill-name>` (repo-level)
+2. `~/.cxp/skills/<skill-name>` (global fallback)
+
+---
+
+## Multi-Project
+
+### Repo registry
+
+`~/.cxp/repos.yaml` maps project names to local paths:
+
+```yaml
+repos:
+    penfold:
+        path: /Users/james/github/otherjamesbrown/penfold
+        default_branch: main
+    context-palace:
+        path: /Users/james/github/otherjamesbrown/context-palace
+        default_branch: main
+```
+
+Created/updated by `cxp pipeline setup`.
+
+### All-projects poller
+
+```bash
+cxp pipeline poller --all-projects
+```
+
+Loads all entries from `~/.cxp/repos.yaml` and polls each project's pipeline config per cycle. Each project gets its own trigger and health checks.
+
+---
+
+## Poller Triggers
+
+The poller checks three conditions each cycle:
+
+| Trigger | Condition | Action |
+|---------|-----------|--------|
+| `new-design` | Open design shard without pipeline metadata | Init pipeline, spawn M |
+| `needs-review` | Task in `needs-review` with parent design in `implement` phase | Spawn M for the parent design |
+| `wait-satisfied` | Pipeline `waiting_for` shards all closed | Spawn M to continue |
+
+Before spawning, the poller checks the pipeline lock. If locked, the design is skipped. Stale locks (5-min TTL) are treated as unlocked.
+
+M sessions are spawned as tmux windows with:
+- Working directory set to the repo root
+- Playbook path and design ID passed as prompt
+- `claude_flags` from dispatch config
+
+---
+
+## Lock Protocol
+
+```bash
+cxp shard pipeline lock <design-id>           # acquire (5-min TTL)
+cxp shard pipeline unlock <design-id>         # release
+cxp shard pipeline lock-check <design-id>     # check status
+```
+
+Session ID defaults to `<agent-name>-<unix-timestamp>`. If M crashes without unlocking, the TTL ensures recovery.
+
+---
 
 ## Commands Reference
 
+### Pipeline commands
+
 | Command | Purpose |
 |---------|---------|
-| `cxp pipeline setup` | Register a repo for pipeline automation |
-| `cxp pipeline poller` | Run the trigger poller |
-| `cxp shard pipeline init/show/update` | Pipeline state management |
-| `cxp shard pipeline review` | Phase 1 gate: readiness review with audit trail |
-| `cxp shard pipeline decompose` | Phase 2 gate: decomposition validation with audit trail |
-| `cxp shard pipeline lock/unlock/lock-check` | Concurrency control |
-| `cxp dashboard` | Outcomes, pipelines, blockers, agents |
+| `cxp pipeline setup` | Register repo, create `.cxp/pipeline.yaml`, update `~/.cxp/repos.yaml` |
+| `cxp pipeline poller` | Poll for triggers and health issues, spawn M sessions |
+| `cxp pipeline init-skills` | Copy default skill files into repo |
+| `cxp pipeline insights` | Analyze execution data, produce report |
+| `cxp pipeline improve` | Suggest/apply pipeline improvements from patterns |
+
+### Shard pipeline commands
+
+| Command | Purpose |
+|---------|---------|
+| `cxp shard pipeline init <id>` | Initialize pipeline metadata on a design |
+| `cxp shard pipeline show <id>` | Display pipeline state, lock, iterations |
+| `cxp shard pipeline update <id>` | Update phase, waiting-for, add-task, tokens |
+| `cxp shard pipeline review <id>` | Phase 1 gate: readiness review (requires `--verdict`, `--readiness`) |
+| `cxp shard pipeline decompose <id>` | Phase 2 gate: decomposition review (requires `--verdict`) |
+| `cxp shard pipeline gate <id> <gate>` | Generic gate: any named gate (requires `--verdict`) |
+| `cxp shard pipeline audit <id>` | Show full gate timeline |
+| `cxp shard pipeline lock <id>` | Acquire pipeline lock |
+| `cxp shard pipeline unlock <id>` | Release pipeline lock |
+| `cxp shard pipeline lock-check <id>` | Check lock status |
+
+### Task commands
+
+| Command | Purpose |
+|---------|---------|
+| `cxp task dispatch <task-id>` | Spawn agent in tmux with full context |
+| `cxp task complete <task-id>` | Post-agent: commit, push, PR, evidence, needs-review |
 | `cxp task deps <design-id>` | Dependency graph with dispatch plan |
-| `cxp task dispatch / dispatch-all` | Spawn agents with full context |
 | `cxp task worktree create/show/remove` | Isolated git worktrees |
 | `cxp task evidence` | Structured evidence append |
 | `cxp task pr create / merge` | PR lifecycle via gh CLI |
 | `cxp task review / review-verdict` | Review dispatch and verdicts |
+| `cxp dashboard` | Outcomes, pipelines, blockers, agents |
 
-## Files
+---
 
-| Path | Purpose |
-|------|---------|
-| `skills/m-playbook.md` | M's decision trees and phase rules |
-| `skills/m-*.md` | Phase-specific skill files |
-| `skills/create-design.md` | Design authoring guide for all agents |
-| `.cxp/pipeline.yaml` | Per-repo pipeline config |
-| `~/.cxp/repos.yaml` | Global repo registry (project → repo path) |
-| `.claude/hooks/m-session-start.sh` | M session context hydration |
+## Skills Reference
+
+| Skill | Who uses it | Purpose |
+|-------|------------|---------|
+| `create-design.md` | Any agent creating designs | Required structure, implementability test |
+| `m-playbook.md` | M (orchestrator) | Decision trees, phase rules, commands |
+| `m-readiness-check.md` | M | Phase 1 readiness + implementability evaluation |
+| `m-implementability.md` | M | Implementability criteria reference |
+| `m-dispatch-task.md` | M | Phase 3 task dispatch procedure |
+| `m-review-pr.md` | M | Phase 4 PR review procedure (agent strategy) |
+| `m-process-pr-review.md` | M | Process external reviewer output (external strategy) |
+| `m-merge-and-verify.md` | M | Phase 4 merge + post-merge verification |
+| `m-stall-check.md` | M | Stall diagnosis for stuck agents |
+| `m-retrospective.md` | M | Post-delivery retrospective |
+
+`create-design.md` and `m-readiness-check.md` are cross-referenced -- the design skill tells authors what is required, the readiness check evaluates against the same criteria.
+
+---
+
+## Config Reference
+
+Full `pipeline.yaml` schema:
+
+```yaml
+# Build and test commands
+build:
+    - cd cxp && go build ./...
+test:
+    - cd cxp && go test ./...
+    - cd cxp && go vet ./...
+
+# Agent roster and domain capabilities
+agents:
+    agent-steve:
+        domains: [cli, migrations, shard-model]
+    agent-mycroft:
+        domains: [backend, services]
+
+# Dispatch configuration
+dispatch:
+    max_concurrent: 3             # max parallel agents
+    tmux_session: main            # tmux session name
+    claude_flags: "--dangerously-skip-permissions"
+    default_model: sonnet         # fallback model
+
+# Health monitoring
+monitoring:
+    stall_timeout: 30m            # duration string
+    crash_check: true             # check for missing tmux windows
+    max_retries: 3                # per-task retry limit
+    cooldown: 5m                  # between retries
+    model: haiku                  # model for health checks
+    actions:
+        on_stall: skill:m-stall-check   # or "redispatch" or "escalate"
+        on_crash: redispatch            # or "skill:<name>" or "escalate"
+        on_max_retries: escalate        # or "redispatch"
+
+# Review configuration
+review:
+    ci:
+        mode: pr-only             # "pr-only", "all-pass", "ignore"
+        wait: true                # wait for CI before reviewing
+    strategy: external            # "external" or "agent"
+    external_reviewers: [gemini]  # GitHub bot usernames (external strategy)
+    process_skill: m-process-pr-review  # skill to process external reviews
+    review_skill: m-review-pr     # skill for agent-based reviews (agent strategy)
+    review_agent: agent-mycroft   # who does agent reviews (agent strategy)
+    model: haiku                  # model for review tasks
+
+# Context layers for CLAUDE.md assembly
+context:
+    layers:
+        - name: architecture
+          source: file:.cxp/context/architecture.md
+          when: always            # "always", "interactive", "dispatch", "gate:<name>"
+        - name: task-prompt
+          source: dispatch-prompt
+          when: dispatch
+
+# Workflow definitions (shard type -> phase list)
+workflows:
+    design:
+        phases: [design, decompose, implement, review, done]
+    bug:
+        phases: [implement, review, done]
+    task:
+        phases: [implement, review, done]
+
+# Auto-deploy after PR merge
+deploy:
+    enabled: true
+    services:
+        - name: ai
+          paths: [services/ai/]
+          command: ./scripts/deploy.sh ai
+
+# GitHub repository
+github:
+    owner_repo: otherjamesbrown/penfold
+
+# Skills directory (relative to repo root)
+skills_dir: skills
+
+# Pipeline phases with models and gates
+phases:
+    - name: design
+      model: haiku
+      gates:
+          - name: readiness-review
+            skill: m-readiness-check
+            model: haiku
+            fields:
+                readiness: {type: int, min: 1, max: 5, required: true}
+    - name: decompose
+      model: sonnet
+      gates:
+          - name: decomposition-review
+            skill: m-decomposition-review
+            model: haiku
+            requires_label: integration-test
+    - name: implement
+      model: sonnet
+    - name: review
+      model: haiku
+    - name: done
+      gates:
+          - name: retrospective
+            skill: m-retrospective
+            model: haiku
+```
+
+---
 
 ## Registered Repos
 
-| Project | Repo | Build |
-|---------|------|-------|
-| penfold | ~/github/otherjamesbrown/penfold | `cd penfold-go-pipeline && go build/test` |
-| context-palace | ~/github/otherjamesbrown/context-palace | `cd cxp && go build/test` |
-
-## What's Next
-
-- **Poller deployment** (`pf-20e7a2`) — launchd service on dev01 for autonomous operation
-- **Grafana panels** (`pf-7ff195`) — monitoring dashboard on dev02
-- **Session/output capture** — record agent output as task_runs for full traceability
-- **CoWork patterns** (`pf-ca054d`) — plugin model, MCP connectors for Jira/Linear
+| Project | Repo | Build | Test |
+|---------|------|-------|------|
+| penfold | ~/github/otherjamesbrown/penfold | `cd penfold-go-pipeline && go build ./...` | `cd penfold-go-pipeline && go test/vet ./...` |
+| context-palace | ~/github/otherjamesbrown/context-palace | `cd cxp && go build ./...` | `cd cxp && go test/vet ./...` |
