@@ -56,11 +56,16 @@ Steps:
 		repoRoot, _ := client.RepoForProject(cpClient.Config.Project)
 		pCfg, _ := client.LoadPipelineConfig(repoRoot)
 
-		// 1. Check for uncommitted changes
+		// 1. Restore original CLAUDE.md if it was overwritten by dispatch context
+		exec.Command("git", "-C", worktreePath, "checkout", "main", "--", "CLAUDE.md").Run()
+
+		// 2. Check for uncommitted changes (excluding generated files)
 		statusOut, err := exec.Command("git", "-C", worktreePath, "status", "--porcelain").Output()
 		if err == nil && len(strings.TrimSpace(string(statusOut))) > 0 {
 			fmt.Println("Committing uncommitted changes...")
 			exec.Command("git", "-C", worktreePath, "add", "-A").Run()
+			// Ensure CLAUDE.md isn't staged if it was restored
+			exec.Command("git", "-C", worktreePath, "reset", "HEAD", "CLAUDE.md").Run()
 			exec.Command("git", "-C", worktreePath, "commit", "-m",
 				fmt.Sprintf("[%s] Auto-commit remaining changes", taskID)).Run()
 		}

@@ -29,19 +29,19 @@ Do NOT check the inbox — context is injected by the hook.
 
 | System | Server | Config |
 |--------|--------|--------|
-| Context Palace | dev02.brown.chat:5432 | ~/.cxp/config.yaml |
+| Context Palace | dev02.brown.chat:5432 | ~/.cp/config.yaml |
 
 - **CP usage guide:** context-palace.md
-- **User preferences:** ~/github/otherjamesbrown/penf-cli/docs/preferences.md (NEVER modify)
+- **User preferences:** ~/github/otherjamesbrown/penfold/docs/preferences.md (NEVER modify)
 
 ## Building
 
 ```bash
 # CLI
-cd cp && go build -o ~/bin/cxp .
+cd cxp && go build -o ~/bin/cxp .
 
 # TUI viewer
-cd cp && go build -o ~/bin/cxpv ./cmd/cxpv/
+cd cxp && go build -o ~/bin/cxpv ./cmd/cxpv/
 ```
 
 ## Troubleshooting
