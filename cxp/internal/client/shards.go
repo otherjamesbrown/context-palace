@@ -777,6 +777,24 @@ func (c *Client) GetShardChildren(ctx context.Context, parentID string) ([]Shard
 	return children, nil
 }
 
+// DeleteShard deletes a shard by ID. Returns an error if the shard is not found.
+func (c *Client) DeleteShard(ctx context.Context, id string) error {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close(ctx)
+
+	result, err := conn.Exec(ctx, `DELETE FROM shards WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete shard: %v", err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("shard not found: %s", id)
+	}
+	return nil
+}
+
 // tryEmbed attempts to embed a shard's content. Non-fatal: silently ignores errors.
 func (c *Client) tryEmbed(ctx context.Context, id, shardType, title, content string) {
 	if c.EmbedProvider == nil {
