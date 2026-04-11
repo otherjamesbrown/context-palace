@@ -1,8 +1,8 @@
 ---
-description: "Implement a spec: read, plan, test-first, build, verify, deploy. Structured pipeline for CP CLI work."
+description: "Implement a spec: read, plan, test-first, build, verify, deploy."
 ---
 
-# Implement — Structured Spec Pipeline
+# Implement — Spec Workflow
 
 Single entry point for implementing specs against the CP CLI codebase.
 
