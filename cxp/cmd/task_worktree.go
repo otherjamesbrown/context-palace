@@ -33,17 +33,14 @@ var taskWorktreeCreateCmd = &cobra.Command{
 
 		project := cpClient.Config.Project
 
-		// Find repo root — try registry first, fall back to cwd
-		repoDir, err := client.RepoForProject(project)
+		// Find repo root from cwd
+		cwd, err := os.Getwd()
 		if err != nil {
-			cwd, err := os.Getwd()
-			if err != nil {
-				return fmt.Errorf("cannot get working directory: %w", err)
-			}
-			repoDir, err = client.GitRepoRoot(cwd)
-			if err != nil {
-				return fmt.Errorf("register repo with `cxp pipeline setup` or run from within a git repository: %w", err)
-			}
+			return fmt.Errorf("cannot get working directory: %w", err)
+		}
+		repoDir, err := client.GitRepoRoot(cwd)
+		if err != nil {
+			return fmt.Errorf("must be run from within a git repository: %w", err)
 		}
 
 		// Create worktree

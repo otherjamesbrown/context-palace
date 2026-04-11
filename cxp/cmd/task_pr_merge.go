@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/otherjamesbrown/context-palace/cxp/internal/client"
 	"github.com/spf13/cobra"
 )
 
@@ -97,38 +96,7 @@ var taskPRMergeCmd = &cobra.Command{
 			fmt.Printf("Removed worktree for %s\n", taskID)
 		}
 
-		// 6. Auto-deploy if configured
-		repoRoot, _ := client.RepoForProject(cpClient.Config.Project)
-		pCfg, _ := client.LoadPipelineConfig(repoRoot)
-		if pCfg != nil && pCfg.Deploy.Enabled && repoRoot != "" {
-			// Get changed files from the PR
-			filesOut, err := exec.CommandContext(ctx, "gh", "pr", "view", prURL,
-				"--json", "files", "--jq", ".files[].path").CombinedOutput()
-			if err == nil {
-				changedFiles := strings.Split(strings.TrimSpace(string(filesOut)), "\n")
-				deployed := map[string]bool{}
-				for _, svc := range pCfg.Deploy.Services {
-					for _, changedFile := range changedFiles {
-						for _, prefix := range svc.Paths {
-							if strings.HasPrefix(changedFile, prefix) && !deployed[svc.Name] {
-								fmt.Printf("Auto-deploying %s (changed: %s)...\n", svc.Name, changedFile)
-								deployOut, deployErr := exec.CommandContext(ctx, "bash", "-c",
-									fmt.Sprintf("cd '%s' && %s", repoRoot, svc.Command)).CombinedOutput()
-								if deployErr != nil {
-									fmt.Fprintf(cmd.ErrOrStderr(), "Deploy %s warning: %v\n%s\n", svc.Name, deployErr, string(deployOut))
-								} else {
-									fmt.Printf("Deployed %s ✓\n", svc.Name)
-								}
-								deployed[svc.Name] = true
-								break
-							}
-						}
-					}
-				}
-			}
-		}
-
-		// 7. Close task
+		// 6. Close task
 		closeOut, err := exec.CommandContext(ctx, "cxp", "shard", "status", taskID, "closed").CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("failed to close task: %w\n%s", err, string(closeOut))

@@ -55,7 +55,10 @@ var taskPRCreateCmd = &cobra.Command{
 		}
 
 		// Detect repo from git remote
-		repo := detectRepo(wtPath)
+		repo, err := client.DetectOwnerRepo(wtPath)
+		if err != nil {
+			return fmt.Errorf("cannot detect github repo for worktree %s: %w", wtPath, err)
+		}
 
 		// 4. Build PR body
 		body := buildPRBody(taskID, task.Title, task.Content)
@@ -115,31 +118,6 @@ var taskPRCreateCmd = &cobra.Command{
 		fmt.Println(prURL)
 		return nil
 	},
-}
-
-// detectRepo extracts the GitHub owner/repo from pipeline config or git remote.
-func detectRepo(dir string) string {
-	// Check pipeline config first
-	pCfg, _ := client.LoadPipelineConfig(dir)
-	if pCfg != nil && pCfg.GitHub.OwnerRepo != "" {
-		return pCfg.GitHub.OwnerRepo
-	}
-
-	// Fall back to git remote detection
-	out, err := exec.Command("git", "-C", dir, "remote", "get-url", "origin").Output()
-	if err != nil {
-		return ""
-	}
-	url := strings.TrimSpace(string(out))
-
-	// Match SSH: git@github.com:owner/repo.git
-	// Match HTTPS: https://github.com/owner/repo.git
-	re := regexp.MustCompile(`github\.com[:/]([^/]+/[^/.\s]+)`)
-	m := re.FindStringSubmatch(url)
-	if len(m) >= 2 {
-		return strings.TrimSuffix(m[1], ".git")
-	}
-	return ""
 }
 
 // buildPRBody constructs the PR description from task info.
