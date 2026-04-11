@@ -2,35 +2,24 @@ package client
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 )
 
 // DashboardData holds all sections of the dashboard output
 type DashboardData struct {
-	Outcomes   []OutcomeStatus   `json:"outcomes"`
-	Pipelines  []PipelineStatus  `json:"pipelines"`
-	Blockers   []BlockerStatus   `json:"blockers"`
-	Agents     []AgentStatus     `json:"agents"`
+	Outcomes []OutcomeStatus `json:"outcomes"`
+	Blockers []BlockerStatus `json:"blockers"`
+	Agents   []AgentStatus   `json:"agents"`
 }
 
 // OutcomeStatus holds an outcome with its design progress
 type OutcomeStatus struct {
-	ID            string `json:"id"`
-	Title         string `json:"title"`
-	DesignTotal   int    `json:"design_total"`
-	DesignClosed  int    `json:"design_closed"`
-	HasProgress   bool   `json:"has_progress"`
-}
-
-// PipelineStatus holds an active pipeline (design with pipeline metadata)
-type PipelineStatus struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
-	Type  string `json:"type"`
-	Phase string `json:"phase"`
-	Note  string `json:"note,omitempty"`
+	ID           string `json:"id"`
+	Title        string `json:"title"`
+	DesignTotal  int    `json:"design_total"`
+	DesignClosed int    `json:"design_closed"`
+	HasProgress  bool   `json:"has_progress"`
 }
 
 // BlockerStatus holds a blocked shard
@@ -60,21 +49,14 @@ func (c *Client) GetDashboardData(ctx context.Context) (*DashboardData, error) {
 	}
 	data.Outcomes = outcomes
 
-	// 2. ACTIVE PIPELINES: designs with pipeline metadata
-	pipelines, err := c.getDashboardPipelines(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("pipelines: %w", err)
-	}
-	data.Pipelines = pipelines
-
-	// 3. BLOCKERS: shards with "blocked" label
+	// 2. BLOCKERS: shards with "blocked" label
 	blockers, err := c.getDashboardBlockers(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("blockers: %w", err)
 	}
 	data.Blockers = blockers
 
-	// 4. AGENTS: in_progress tasks grouped by owner
+	// 3. AGENTS: in_progress tasks grouped by owner
 	agents, err := c.getDashboardAgents(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("agents: %w", err)
@@ -123,69 +105,6 @@ func (c *Client) getDashboardOutcomes(ctx context.Context) ([]OutcomeStatus, err
 		outcomes = append(outcomes, o)
 	}
 	return outcomes, rows.Err()
-}
-
-// getDashboardPipelines fetches designs that have pipeline metadata
-func (c *Client) getDashboardPipelines(ctx context.Context) ([]PipelineStatus, error) {
-	conn, err := c.Connect(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer conn.Close(ctx)
-
-	rows, err := conn.Query(ctx, `
-		SELECT id, title, type, COALESCE(metadata, '{}')
-		FROM shards
-		WHERE project = $1
-			AND type = 'design'
-			AND status IN ('open', 'ready', 'in_progress', 'needs-review')
-			AND metadata ? 'pipeline'
-		ORDER BY updated_at DESC
-		LIMIT 50
-	`, c.Config.Project)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query pipelines: %v", err)
-	}
-	defer rows.Close()
-
-	var pipelines []PipelineStatus
-	for rows.Next() {
-		var id, title, shardType string
-		var meta json.RawMessage
-		if err := rows.Scan(&id, &title, &shardType, &meta); err != nil {
-			return nil, fmt.Errorf("failed to scan pipeline: %v", err)
-		}
-
-		phase, note := extractPipelineInfo(meta)
-		pipelines = append(pipelines, PipelineStatus{
-			ID:    id,
-			Title: title,
-			Type:  shardType,
-			Phase: phase,
-			Note:  note,
-		})
-	}
-	return pipelines, rows.Err()
-}
-
-// extractPipelineInfo extracts phase and note from pipeline metadata
-func extractPipelineInfo(meta json.RawMessage) (string, string) {
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(meta, &m); err != nil {
-		return "", ""
-	}
-	pipelineRaw, ok := m["pipeline"]
-	if !ok {
-		return "", ""
-	}
-	var pipeline map[string]interface{}
-	if err := json.Unmarshal(pipelineRaw, &pipeline); err != nil {
-		return "", ""
-	}
-
-	phase, _ := pipeline["phase"].(string)
-	note, _ := pipeline["note"].(string)
-	return phase, note
 }
 
 // getDashboardBlockers fetches shards with the "blocked" label
