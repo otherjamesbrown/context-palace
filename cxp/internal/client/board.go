@@ -91,6 +91,97 @@ type BoardOpts struct {
 	All    bool       // Show all types (overrides Types)
 }
 
+// FormatBoardCompact formats a BoardResult in compact mode, targeting < 2KB output.
+// Focus items show full detail; needs-review is capped at 5; open work shows counts.
+func FormatBoardCompact(result *BoardResult) string {
+	var sb strings.Builder
+	sb.WriteString("# Board #\n")
+
+	// Focus section — always full detail
+	if len(result.Focus) > 0 {
+		fmt.Fprintf(&sb, "\n## Focus (%d)\n", len(result.Focus))
+		for _, e := range result.Focus {
+			title := Truncate(e.Title, 50)
+			fmt.Fprintf(&sb, "  ▶ %-12s  %-50s  %dt  -%dh\n",
+				e.ID, title, e.TokenEstimate, e.AgeHours)
+		}
+	}
+
+	// Needs Review — cap at 5 with overflow hint
+	if len(result.NeedsReview) > 0 {
+		fmt.Fprintf(&sb, "\n## Needs Review (%d)\n", len(result.NeedsReview))
+		shown := result.NeedsReview
+		overflow := 0
+		if len(shown) > 5 {
+			overflow = len(shown) - 5
+			shown = shown[:5]
+		}
+		for _, e := range shown {
+			title := Truncate(e.Title, 45)
+			fmt.Fprintf(&sb, "  %-12s  %-45s  %dt\n",
+				e.ID, title, e.TokenEstimate)
+		}
+		if overflow > 0 {
+			fmt.Fprintf(&sb, "  (+%d more — run `cxp board -v review`)\n", overflow)
+		}
+	}
+
+	// Open Work — one line per group type
+	if len(result.Groups) > 0 {
+		sb.WriteString("\n## Open Work\n")
+		for _, g := range result.Groups {
+			compactBoardGroupLine(&sb, g)
+		}
+	}
+
+	return sb.String()
+}
+
+// compactBoardGroupLine writes a single Open Work line for a board group.
+func compactBoardGroupLine(sb *strings.Builder, g BoardGroup) {
+	n := len(g.Items)
+	switch g.Type {
+	case "design":
+		fmt.Fprintf(sb, "  %-16s %d  (run `cxp board -v designs`)\n", "Designs:", n)
+	case "run":
+		ids := boardIDs(g.Items)
+		fmt.Fprintf(sb, "  %-16s %d  (%s — run `cobuild status`)\n",
+			"CoBuild runs:", n, strings.Join(ids, " "))
+	case "bug":
+		if n <= 10 {
+			ids := boardIDs(g.Items)
+			fmt.Fprintf(sb, "  %-16s %d  (%s)\n", "Bugs:", n, strings.Join(ids, " "))
+		} else {
+			fmt.Fprintf(sb, "  %-16s %d  (run `cxp board -v bugs`)\n", "Bugs:", n)
+		}
+	default:
+		label := capitalize(g.Type) + "s:"
+		if n <= 10 {
+			ids := boardIDs(g.Items)
+			fmt.Fprintf(sb, "  %-16s %d  (%s)\n", label, n, strings.Join(ids, " "))
+		} else {
+			fmt.Fprintf(sb, "  %-16s %d  (run `cxp board -v %ss`)\n", label, n, g.Type)
+		}
+	}
+}
+
+// boardIDs returns the IDs from a slice of BoardEntry.
+func boardIDs(items []BoardEntry) []string {
+	ids := make([]string, len(items))
+	for i, e := range items {
+		ids[i] = e.ID
+	}
+	return ids
+}
+
+// capitalize uppercases the first character of s.
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
 // GetBoardShards returns shards grouped by type for the board view
 func (c *Client) GetBoardShards(ctx context.Context, opts BoardOpts) (*BoardResult, error) {
 	conn, err := c.Connect(ctx)

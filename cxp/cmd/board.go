@@ -38,6 +38,7 @@ var boardCmd = &cobra.Command{
 		opts.Agent, _ = cmd.Flags().GetString("agent")
 		opts.Budget, _ = cmd.Flags().GetInt("budget")
 		opts.All, _ = cmd.Flags().GetBool("all")
+		boardFormat, _ := cmd.Flags().GetString("format")
 
 		typesStr, _ := cmd.Flags().GetString("types")
 		if typesStr != "" {
@@ -49,9 +50,17 @@ var boardCmd = &cobra.Command{
 			return err
 		}
 
-		if outputFormat == "json" {
+		// --format=compact takes precedence over config-defaulted output format;
+		// only -o json explicitly passed by the user overrides it.
+		jsonExplicit := cmd.Flags().Changed("output") && outputFormat == "json"
+		if jsonExplicit || (outputFormat == "json" && boardFormat == "verbose") {
 			s, _ := client.FormatJSON(result)
 			fmt.Println(s)
+			return nil
+		}
+
+		if boardFormat == "compact" {
+			fmt.Print(client.FormatBoardCompact(result))
 			return nil
 		}
 
@@ -171,6 +180,7 @@ func init() {
 	boardCmd.Flags().Int("budget", 0, "Token budget highlight threshold")
 	boardCmd.Flags().Bool("all", false, "Show all shard types including knowledge")
 	boardCmd.Flags().String("types", "", "Shard types to show (comma-separated)")
+	boardCmd.Flags().String("format", "verbose", "Output format: verbose (default) or compact")
 
 	rootCmd.AddCommand(boardCmd)
 }
