@@ -1,0 +1,23 @@
+# Pipeline configuration for context-palace
+# See: cobuild setup --help
+
+github:
+    owner_repo: otherjamesbrown/context-palace
+
+build:
+    - cd cxp && go build ./...
+test:
+    - cd cxp && go test ./...
+    - cd cxp && go vet ./...
+
+connectors:
+    work_items:
+        type: context-palace
+
+storage:
+    backend: postgres
+
+dispatch:
+    max_concurrent: 3
+
+skills_dir: skills

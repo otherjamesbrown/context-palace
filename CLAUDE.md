@@ -24,3 +24,9 @@ cd cxp && go build -o ~/bin/cxpv ./cmd/cxpv/
 ```bash
 cxp status
 ```
+
+## CoBuild
+
+This project uses [CoBuild](https://github.com/otherjamesbrown/cobuild) for pipeline automation — designs flow through structured phases with quality gates.
+
+**Read `AGENTS.md` for pipeline instructions, commands, and task completion protocol.**
