@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/otherjamesbrown/context-palace/cxp/internal/client"
@@ -591,6 +592,79 @@ func resolveKBMode() string {
 	return "hybrid"
 }
 
+var kbExportPlaybookCmd = &cobra.Command{
+	Use:   "export-playbook",
+	Short: "Export the playbook shard to a file",
+	Long: `Reads the configured KB root (or --root shard) and writes its content to a file.
+
+Formats:
+  raw     Raw markdown content, no wrapper (default)
+  claude  Same as raw (Claude Code reads plain markdown)
+  codex   AGENTS.md-compatible: prefix with agent header comment
+  cursor  Adds YAML frontmatter suitable for .cursor/rules`,
+	Example: `  cxp kb export-playbook --output .playbook.md
+  cxp kb export-playbook --format cursor --output .cursor/rules/playbook.md
+  cxp kb export-playbook --format codex --output AGENTS.md
+  cxp kb export-playbook --root pf-34494b --output /tmp/test.md`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		rootID, _ := cmd.Flags().GetString("root")
+		outputPath, _ := cmd.Flags().GetString("output")
+		format, _ := cmd.Flags().GetString("format")
+
+		if rootID == "" {
+			rootID = resolveKBRoot()
+		}
+		if rootID == "" {
+			return fmt.Errorf("knowledge base root not configured. Set --root or add knowledge_base.root to ~/.cxp/config.yaml")
+		}
+
+		if outputPath == "" {
+			outputPath = ".playbook.md"
+		}
+
+		switch format {
+		case "raw", "claude", "codex", "cursor":
+			// valid
+		default:
+			return fmt.Errorf("invalid format %q: use raw, claude, codex, or cursor", format)
+		}
+
+		ctx := context.Background()
+		doc, err := cpClient.ShowKnowledgeDoc(ctx, rootID)
+		if err != nil {
+			return fmt.Errorf("fetch shard %s: %w", rootID, err)
+		}
+
+		content := buildExportContent(doc, format)
+
+		if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+			return fmt.Errorf("create output directory: %w", err)
+		}
+
+		if err := os.WriteFile(outputPath, []byte(content), 0o644); err != nil {
+			return fmt.Errorf("write output: %w", err)
+		}
+
+		fmt.Printf("Wrote playbook to %s (%d bytes)\n", outputPath, len(content))
+		return nil
+	},
+}
+
+func buildExportContent(doc *client.KnowledgeDoc, format string) string {
+	body := doc.Content
+	switch format {
+	case "codex":
+		header := fmt.Sprintf("# AGENTS.md — generated from %s\n# DO NOT EDIT: regenerate with `cxp kb export-playbook --format codex`\n\n", doc.ID)
+		return header + body
+	case "cursor":
+		frontmatter := fmt.Sprintf("---\ndescription: Playbook (generated from %s)\nalwaysApply: true\n---\n\n", doc.ID)
+		return frontmatter + body
+	default:
+		// raw and claude: plain markdown
+		return body
+	}
+}
+
 func init() {
 	// kb search flags
 	kbSearchCmd.Flags().String("root", "", "Knowledge base root shard ID (overrides config)")
@@ -629,6 +703,11 @@ func init() {
 	// kb delete flags
 	kbDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 
+	// kb export-playbook flags
+	kbExportPlaybookCmd.Flags().String("root", "", "Shard ID to export (default: config knowledge_base.root)")
+	kbExportPlaybookCmd.Flags().String("output", "", "Output file path (default: .playbook.md)")
+	kbExportPlaybookCmd.Flags().String("format", "raw", "Output format: raw, claude, codex, cursor")
+
 	kbCmd.AddCommand(kbSearchCmd)
 	kbCmd.AddCommand(kbTreeCmd)
 	kbCmd.AddCommand(kbShowCmd)
@@ -637,5 +716,6 @@ func init() {
 	kbCmd.AddCommand(kbUpdateCmd)
 	kbCmd.AddCommand(kbAppendCmd)
 	kbCmd.AddCommand(kbDeleteCmd)
+	kbCmd.AddCommand(kbExportPlaybookCmd)
 	rootCmd.AddCommand(kbCmd)
 }
