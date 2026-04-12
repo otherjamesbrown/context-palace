@@ -44,6 +44,7 @@ COMMANDS:
   knowledge create|list|show|update|     Knowledge documents
             append|history|diff
   kb search|tree                         Knowledge base search & browse
+  schedule run                           Scheduled workflow execution
 
   memory add|list|search|resolve|defer   Agent memory
   message send|inbox|show|read           Agent messaging
