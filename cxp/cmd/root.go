@@ -41,6 +41,8 @@ COMMANDS:
   design create                          Create a design (plan/feature)
   bug create                             Create a bug (defect)
   task get|create|claim|progress|close   Task management
+  schedule list|create|enable|disable|   Scheduled workflow management
+           run|history|last
   knowledge create|list|show|update|     Knowledge documents
             append|history|diff
   kb search|tree                         Knowledge base search & browse
