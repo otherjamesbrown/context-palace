@@ -2,12 +2,16 @@ package cmd
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/otherjamesbrown/context-palace/cxp/internal/client"
+	"github.com/otherjamesbrown/context-palace/cxp/internal/workflows"
 	"github.com/spf13/cobra"
 )
 
@@ -170,7 +174,7 @@ var scheduleRunCmd = &cobra.Command{
 			return err
 		}
 
-		summary, result, workflowErr := runScheduleWorkflow(ctx, schedule)
+		summary, result, workflowErr := runScheduleWorkflow(ctx, schedule, run.ID)
 		status := client.ScheduleRunStatusCompleted
 		if workflowErr != nil {
 			status = client.ScheduleRunStatusFailed
@@ -297,10 +301,46 @@ var scheduleLastCmd = &cobra.Command{
 	},
 }
 
-func runScheduleWorkflow(ctx context.Context, schedule *client.Schedule) (string, json.RawMessage, error) {
-	_ = ctx
-	_ = schedule
-	return "", nil, errors.New("workflow not implemented")
+func runScheduleWorkflow(ctx context.Context, schedule *client.Schedule, runID int) (string, json.RawMessage, error) {
+	switch schedule.WorkflowType {
+	case "drift-scan":
+		var cfg workflows.DriftScanConfig
+		if len(schedule.Config) > 0 {
+			if err := json.Unmarshal(schedule.Config, &cfg); err != nil {
+				return "", nil, fmt.Errorf("parse drift-scan config: %w", err)
+			}
+		}
+		if strings.TrimSpace(cfg.Project) == "" {
+			cfg.Project = schedule.Project
+		}
+		cfg.RunID = runID
+
+		db, err := sql.Open("pgx", cpClient.ConnectionString())
+		if err != nil {
+			return "", nil, fmt.Errorf("connect schedule workflow db: %w", err)
+		}
+		defer db.Close()
+
+		output, err := workflows.RunDriftScanDetailed(ctx, db, cfg)
+		if err != nil {
+			return "", nil, err
+		}
+		raw, err := json.Marshal(output)
+		if err != nil {
+			return "", nil, fmt.Errorf("marshal drift-scan result: %w", err)
+		}
+		summary := fmt.Sprintf(
+			"Scanned %d articles, checked %d claims, found %d broken claims, ran %d semantic checks, logged %d gaps",
+			output.ArticlesScanned,
+			output.ClaimsChecked,
+			output.ClaimsBroken,
+			output.SemanticChecks,
+			output.GapsLogged,
+		)
+		return summary, raw, nil
+	default:
+		return "", nil, errors.New("workflow not implemented")
+	}
 }
 
 func scheduleRunErrorResult(err error) json.RawMessage {
