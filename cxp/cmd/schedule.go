@@ -3,11 +3,12 @@ package cmd
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
 	"github.com/otherjamesbrown/context-palace/cxp/internal/client"
+	"github.com/otherjamesbrown/context-palace/cxp/internal/scheduler"
+	_ "github.com/otherjamesbrown/context-palace/cxp/internal/scheduler/workflows"
 	"github.com/spf13/cobra"
 )
 
@@ -298,9 +299,24 @@ var scheduleLastCmd = &cobra.Command{
 }
 
 func runScheduleWorkflow(ctx context.Context, schedule *client.Schedule) (string, json.RawMessage, error) {
-	_ = ctx
-	_ = schedule
-	return "", nil, errors.New("workflow not implemented")
+	runner, err := scheduler.DefaultRegistry.Get(schedule.WorkflowType)
+	if err != nil {
+		return "", nil, err
+	}
+	return runner.Run(ctx, schedule.Config)
+}
+
+var scheduleWorkflowsCmd = &cobra.Command{
+	Use:   "workflows",
+	Short: "List registered workflow types",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		types := scheduler.DefaultRegistry.List()
+		fmt.Println("WORKFLOW_TYPE")
+		for _, t := range types {
+			fmt.Println(t)
+		}
+		return nil
+	},
 }
 
 func scheduleRunErrorResult(err error) json.RawMessage {
@@ -357,6 +373,7 @@ func init() {
 	scheduleCmd.AddCommand(scheduleRunCmd)
 	scheduleCmd.AddCommand(scheduleHistoryCmd)
 	scheduleCmd.AddCommand(scheduleLastCmd)
+	scheduleCmd.AddCommand(scheduleWorkflowsCmd)
 
 	rootCmd.AddCommand(scheduleCmd)
 }
