@@ -284,10 +284,14 @@ cxp message read pf-abc                                  # Read and mark as read
 Context Palace includes a pluggable workflow runner for periodic maintenance work. Projects subscribe to schedules that run on cron expressions.
 
 ```bash
+# Subscribe a project to drift-scan, canary, and triage in one command
+# (creates gaps/canaries/escalations shards if absent; idempotent)
+cxp schedule init --repo-path /path/to/repo
+
 # See registered workflows
 cxp schedule workflows
 
-# Create a schedule
+# Create a one-off schedule manually
 cxp schedule create nightly-drift --workflow drift-scan --cron "0 3 * * *" \
   --config '{"repo_path":"/path/to/repo","gaps_shard":"cp-kb-gaps"}'
 
