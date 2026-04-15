@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -793,6 +794,47 @@ func (c *Client) DeleteShard(ctx context.Context, id string) error {
 		return fmt.Errorf("shard not found: %s", id)
 	}
 	return nil
+}
+
+// GetProjectIDPrefix returns the 2–3 character shard ID prefix for the configured project.
+// It derives the prefix by querying the first shard ID and extracting the component before the first hyphen.
+func (c *Client) GetProjectIDPrefix(ctx context.Context) (string, error) {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close(ctx)
+
+	var shardID string
+	err = conn.QueryRow(ctx, `SELECT id FROM shards WHERE project = $1 LIMIT 1`, c.Config.Project).Scan(&shardID)
+	if err == pgx.ErrNoRows {
+		return "", fmt.Errorf("no shards found for project %s; cannot determine ID prefix", c.Config.Project)
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to determine project ID prefix: %v", err)
+	}
+	parts := strings.SplitN(shardID, "-", 2)
+	return parts[0], nil
+}
+
+// FindShardByLabelAndTitle searches for a shard with the given label and exact title match.
+// Returns (nil, nil) if not found.
+func (c *Client) FindShardByLabelAndTitle(ctx context.Context, label, title, shardType string) (*ShardListResult, error) {
+	results, err := c.ListShardsFiltered(ctx, ListShardsOpts{
+		Types:  []string{shardType},
+		Labels: []string{label},
+		Limit:  50,
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range results {
+		if r.Title == title {
+			result := r
+			return &result, nil
+		}
+	}
+	return nil, nil
 }
 
 // tryEmbed attempts to embed a shard's content. Non-fatal: silently ignores errors.
