@@ -66,6 +66,11 @@ func (r CanaryRunner) Run(ctx context.Context, configRaw json.RawMessage) (strin
 	if err != nil {
 		return "", nil, fmt.Errorf("load canaries: %w", err)
 	}
+	if len(questions) == 0 {
+		return "no questions seeded — run `cxp schedule seed-canaries`",
+			nil,
+			fmt.Errorf("canaries shard is empty: run \"cxp schedule seed-canaries\" to populate it")
+	}
 
 	result := CanaryResult{QuestionsTotal: len(questions)}
 
@@ -102,9 +107,12 @@ func (r CanaryRunner) Run(ctx context.Context, configRaw json.RawMessage) (strin
 	return summary, resultJSON, nil
 }
 
+// getShardContentFn is the function used to fetch shard content; overridable in tests.
+var getShardContentFn = getShardContent
+
 // loadCanaryQuestions reads the canary shard body and parses YAML question entries.
 func loadCanaryQuestions(ctx context.Context, shardID string) ([]CanaryQuestion, error) {
-	content, err := getShardContent(ctx, shardID)
+	content, err := getShardContentFn(ctx, shardID)
 	if err != nil {
 		return nil, err
 	}
@@ -132,22 +140,6 @@ func extractYAMLBlock(content string) string {
 		}
 	}
 	return content
-}
-
-// getShardContent retrieves the body of a shard by running cxp shard show.
-func getShardContent(ctx context.Context, shardID string) (string, error) {
-	cmd := exec.CommandContext(ctx, "cxp", "shard", "show", shardID, "--output", "json")
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("cxp shard show %s: %w", shardID, err)
-	}
-	var shard struct {
-		Body string `json:"body"`
-	}
-	if err := json.Unmarshal(out, &shard); err != nil {
-		return string(out), nil
-	}
-	return shard.Body, nil
 }
 
 // runKBSearch invokes cxp kb search and concatenates snippet+title pairs into a blob.

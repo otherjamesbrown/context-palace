@@ -3,6 +3,7 @@ package workflows
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -172,6 +173,31 @@ func TestCanaryRunner_Run_NilConfig(t *testing.T) {
 	_, _, err := r.Run(context.Background(), nil)
 	if err == nil {
 		t.Fatal("expected error when config is nil (missing required fields)")
+	}
+}
+
+func TestCanaryRunner_Run_EmptyShard(t *testing.T) {
+	// Override getShardContentFn to return empty content (simulates an unseeded shard).
+	orig := getShardContentFn
+	getShardContentFn = func(_ context.Context, _ string) (string, error) {
+		return "", nil
+	}
+	defer func() { getShardContentFn = orig }()
+
+	r := CanaryRunner{}
+	cfg, _ := json.Marshal(CanaryConfig{
+		CanaryShard: "cp-canary-test",
+		GapsShard:   "cp-gaps-test",
+	})
+	summary, _, err := r.Run(context.Background(), cfg)
+	if err == nil {
+		t.Fatal("expected error for empty canaries shard, got nil")
+	}
+	if !strings.Contains(summary, "seed-canaries") {
+		t.Errorf("summary %q does not contain 'seed-canaries'", summary)
+	}
+	if !strings.Contains(err.Error(), "seed-canaries") {
+		t.Errorf("error %q does not contain 'seed-canaries'", err.Error())
 	}
 }
 
