@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Context Palace daemon — macOS launchd service template
+
+  Before installing, replace /Users/YOUR_USERNAME with your actual home directory:
+    sed "s|/Users/YOUR_USERNAME|$HOME|g" docs/scheduler/launchd.plist \
+      > ~/Library/LaunchAgents/com.brown.cxp.daemon.plist
+
+  Install:
+    launchctl load ~/Library/LaunchAgents/com.brown.cxp.daemon.plist
+
+  Start / stop manually:
+    launchctl start com.brown.cxp.daemon
+    launchctl stop  com.brown.cxp.daemon
+
+  Uninstall:
+    launchctl unload ~/Library/LaunchAgents/com.brown.cxp.daemon.plist
+    rm ~/Library/LaunchAgents/com.brown.cxp.daemon.plist
+
+  Logs:
+    tail -f ~/Library/Logs/cxp-daemon.log
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.brown.cxp.daemon</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/YOUR_USERNAME/bin/cxp</string>
+    <string>daemon</string>
+    <string>start</string>
+  </array>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/YOUR_USERNAME/Library/Logs/cxp-daemon.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/YOUR_USERNAME/Library/Logs/cxp-daemon.log</string>
+</dict>
+</plist>

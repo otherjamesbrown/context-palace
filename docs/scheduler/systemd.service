@@ -1,0 +1,31 @@
+# Context Palace daemon — Linux systemd user service template
+#
+# Install:
+#   mkdir -p ~/.config/systemd/user
+#   cp docs/scheduler/systemd.service ~/.config/systemd/user/cxp-daemon.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable cxp-daemon
+#   systemctl --user start cxp-daemon
+#
+# Status / logs:
+#   systemctl --user status cxp-daemon
+#   journalctl --user -u cxp-daemon -f
+#
+# Stop / disable:
+#   systemctl --user stop cxp-daemon
+#   systemctl --user disable cxp-daemon
+#
+# Note: %h expands to the user's home directory ($HOME) in systemd user units.
+
+[Unit]
+Description=Context Palace daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/bin/cxp daemon start
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

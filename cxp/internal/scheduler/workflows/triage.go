@@ -194,20 +194,6 @@ func actionHintForCategory(category string) string {
 	}
 }
 
-func getShardContent(ctx context.Context, shardID string) (string, error) {
-	cmd := exec.CommandContext(ctx, "cxp", "shard", "show", shardID, "--output", "json")
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	var resp struct {
-		Body string `json:"body"`
-	}
-	if err := json.Unmarshal(out, &resp); err != nil {
-		return "", err
-	}
-	return resp.Body, nil
-}
 
 func createTask(ctx context.Context, title, body string) (string, error) {
 	cmd := exec.CommandContext(ctx, "cxp", "task", "create", title, "--body", body, "--output", "json")

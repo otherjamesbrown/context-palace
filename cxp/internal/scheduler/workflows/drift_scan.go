@@ -166,20 +166,6 @@ func listKBArticles(ctx context.Context) ([]string, error) {
 	return ids, nil
 }
 
-func getShardContent(ctx context.Context, id string) (string, error) {
-	cmd := exec.CommandContext(ctx, "cxp", "shard", "show", id, "--output", "json")
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	var shard struct {
-		Content string `json:"content"`
-	}
-	if err := json.Unmarshal(out, &shard); err != nil {
-		return "", err
-	}
-	return shard.Content, nil
-}
 
 func appendGap(ctx context.Context, gapsShard string, broken BrokenAnchor) error {
 	line := fmt.Sprintf("%s | drift-scan | drift-detected | article=%s type=%s value=%s reason=%s",

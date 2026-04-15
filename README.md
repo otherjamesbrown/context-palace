@@ -296,13 +296,29 @@ cxp schedule list
 cxp schedule enable nightly-drift
 cxp schedule disable nightly-drift
 
-# Run in foreground (manual trigger; useful for testing)
+# Run in foreground (manual trigger; useful for testing — no daemon required)
 cxp schedule run nightly-drift
 
 # History
 cxp schedule history nightly-drift
 cxp schedule last nightly-drift
 ```
+
+### Daemon (automatic schedule firing)
+
+For schedules to fire on their cron expressions without manual intervention, run the daemon:
+
+```bash
+# Start the daemon (fires schedules automatically)
+cxp daemon start
+
+# Check daemon status
+cxp daemon status
+```
+
+`cxp schedule run <name>` continues to work without the daemon — useful for testing or one-off runs.
+
+For unattended operation (system boot, session restart), install `cxp daemon start` as an OS service. See `docs/scheduler/` for launchd (macOS) and systemd (Linux) templates.
 
 ### Built-in workflows
 

@@ -283,6 +283,12 @@ If your project already uses CoBuild for pipeline automation:
    cxp schedule init --repo-path /path/to/repo
    ```
    This creates drift scan, canary, and triage schedules with sensible defaults, and creates the gaps/canaries/escalations shards if they don't exist.
+
+   **The daemon must be running for schedules to fire automatically.** Start it with:
+   ```bash
+   cxp daemon start
+   ```
+   For unattended operation (system boot, session restart), install it as an OS service. See `docs/scheduler/` for launchd (macOS) and systemd (Linux) templates.
 4. **Seed canary questions** — write 20-30 questions covering your most important KB articles.
 
 ### For projects not using CoBuild
@@ -293,7 +299,7 @@ The scheduled workflows (drift scan, canary, triage) operate independently of Co
 - Daily retrieval quality testing
 - Weekly gap triage and escalation
 
-Subscribe via `cxp schedule init` once the CP scheduler is available.
+Subscribe via `cxp schedule init`, then start the daemon (`cxp daemon start`) for schedules to fire automatically. See `docs/scheduler/` for OS service templates.
 
 ### Minimum viable maintenance
 
