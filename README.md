@@ -228,6 +228,14 @@ cxp memory search "timestamp"       # Search memories
 
 Memories can have triggers (conditions that make them relevant) and expiry dates. They're personal to an agent, while knowledge shards are shared across agents.
 
+### KB Deep Dives
+
+Three companion guides go beyond this overview:
+
+- **`docs/kb-shard-architecture.md`** — why KB shards work for agents (theory, tiered retrieval, spec→work→KB lifecycle)
+- **`docs/kb-authoring-guide.md`** — how to write and structure a KB (abstraction levels, article types, bootstrap process, multi-agent authoring)
+- **`docs/kb-maintenance-guide.md`** — how to keep a KB accurate over time (kb-sync, drift scan, canary testing, weekly triage)
+
 ## Work Tracking — How Agents Coordinate
 
 Work tracking uses three shard types with a simple lifecycle:
@@ -271,6 +279,44 @@ cxp message send agent-steve "Bug report" --body "..."   # Send a message
 cxp message read pf-abc                                  # Read and mark as read
 ```
 
+## Scheduled Workflows
+
+Context Palace includes a pluggable workflow runner for periodic maintenance work. Projects subscribe to schedules that run on cron expressions.
+
+```bash
+# See registered workflows
+cxp schedule workflows
+
+# Create a schedule
+cxp schedule create nightly-drift --workflow drift-scan --cron "0 3 * * *" \
+  --config '{"repo_path":"/path/to/repo","gaps_shard":"cp-kb-gaps"}'
+
+# List / manage
+cxp schedule list
+cxp schedule enable nightly-drift
+cxp schedule disable nightly-drift
+
+# Run in foreground (manual trigger; useful for testing)
+cxp schedule run nightly-drift
+
+# History
+cxp schedule history nightly-drift
+cxp schedule last nightly-drift
+```
+
+### Built-in workflows
+
+| Workflow | Purpose |
+|----------|---------|
+| `noop` | Stub for verifying the runner path end-to-end |
+| `drift-scan` | Re-verify KB article anchors against current code; log broken references to the gaps shard |
+| `canary` | Run retrieval-quality questions against the KB; log failures where expected facts aren't found |
+| `triage` | Read the gaps shard, group failures by category, create tasks, escalate recurring issues |
+
+Custom workflows implement the `scheduler.WorkflowRunner` interface in `cxp/internal/scheduler/workflows/` and self-register via `init()`.
+
+See `docs/kb-maintenance-guide.md` for the full story of how these workflows keep a KB accurate over time.
+
 ## Core Primitives
 
 ### Shards
@@ -313,6 +359,17 @@ Tags for filtering and routing:
 ### Projects
 
 A **project** is a namespace with a unique ID prefix. Shards are scoped to a project; the prefix is auto-applied to shard IDs.
+
+### Schedules
+
+Scheduled workflows are backed by two tables alongside the shard store:
+
+| Table | Purpose |
+|-------|---------|
+| `schedules` | Per-project cron subscriptions (workflow_type, schedule_expr, enabled, config) |
+| `schedule_runs` | Execution history (started_at, status, summary, structured result) |
+
+Managed via `cxp schedule` commands. See the Scheduled Workflows section above.
 
 ## Configuration
 
