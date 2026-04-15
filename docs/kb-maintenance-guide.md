@@ -176,9 +176,33 @@ A canary failure tells you one of three things:
 
 All three are actionable. The gap entry includes the failing question, the agent's actual response, and the expected facts — enough to diagnose which category the failure falls into.
 
-### Writing canary questions
+### Seeding canary questions
 
-Canary questions live in a dedicated shard (see meta-KB shards in `kb-authoring-guide.md`). Format:
+When a project first subscribes to the canary workflow, the canary shard is empty. Seed it with the built-in generic starter pack:
+
+```bash
+cxp schedule seed-canaries --shard <canary-shard-id>
+```
+
+This merges 13 generic questions covering common KB article shapes (playbook lookup, architecture, subsystem retrieval, config lookup, operational runbooks) into the shard. The operation is idempotent — rerunning it won't duplicate questions.
+
+After seeding, review and customise the questions for your project:
+
+```bash
+# List current questions with validation flags
+cxp schedule canary list --shard <canary-shard-id>
+
+# Add a project-specific question
+cxp schedule canary add \
+  --question "What model does the classify_project stage use?" \
+  --expected "gemini-2.5-flash,classify_project,ai_routing_rules" \
+  --source pf-861f0c \
+  --shard <canary-shard-id>
+```
+
+The `--shard` flag is optional if a "canary" schedule exists for the project — the commands auto-detect `canary_shard` from the schedule config.
+
+**Question format** (stored in the canary shard as a fenced YAML block):
 
 ```yaml
 - q: "What model does the classify_project stage use?"
@@ -195,13 +219,16 @@ Each question targets a specific article. Good canary questions:
 - Cover the most important articles (high access count, critical subsystems)
 - Test both keyword and semantic retrieval (some questions should use the exact terms in the article, others should use natural language)
 - Include 2-4 expected facts per question — enough to verify the right article was found without being so specific that minor rewording causes a false failure
+- Set `source_kb` to the shard ID of the article being tested — `cxp schedule canary list` flags questions missing this
 - Are updated after any KB renovation or major restructuring
+
+A generic starter template is available at `templates/canary-questions.yaml`.
 
 ### Configuration
 
 ```bash
 cxp schedule create canary --cron "0 6 * * *" \
-  --config '{"canary_shard": "pf-kb-canaries", "agent_model": "gemini/gemini-2.5-flash"}'
+  --config '{"canary_shard": "pf-kb-canaries", "gaps_shard": "pf-kb-gaps"}'
 ```
 
 ## Weekly: Triage
@@ -287,7 +314,7 @@ If your project already uses CoBuild for pipeline automation:
    ```bash
    cxp daemon start    # foreground; install the service template for persistence
    ```
-5. **Seed canary questions** — write 20-30 questions covering your most important KB articles.
+5. **Seed canary questions** — `cxp schedule seed-canaries` adds a generic starter pack. Then add project-specific questions with `cxp schedule canary add`, or hand-write 20-30 questions covering your most important KB articles.
 
 ### For projects not using CoBuild
 

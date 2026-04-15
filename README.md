@@ -302,6 +302,12 @@ cxp schedule run nightly-drift
 # History
 cxp schedule history nightly-drift
 cxp schedule last nightly-drift
+
+# Canary question management
+cxp schedule seed-canaries --shard <canary-shard-id>   # seed generic starter pack
+cxp schedule canary add \
+  --question "..." --expected "fact1,fact2" --source <kb-shard-id>
+cxp schedule canary list                               # list with validation flags
 ```
 
 ### Daemon

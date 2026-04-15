@@ -61,7 +61,7 @@ func (r DriftScanRunner) Run(ctx context.Context, configRaw json.RawMessage) (st
 	result := DriftScanResult{ArticlesScanned: len(articles)}
 
 	for _, articleID := range articles {
-		content, err := driftShardContent(ctx, articleID)
+		content, err := getShardContent(ctx, articleID)
 		if err != nil {
 			continue
 		}
@@ -164,21 +164,6 @@ func listKBArticles(ctx context.Context) ([]string, error) {
 		ids[i] = it.ID
 	}
 	return ids, nil
-}
-
-func driftShardContent(ctx context.Context, id string) (string, error) {
-	cmd := exec.CommandContext(ctx, "cxp", "shard", "show", id, "--output", "json")
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	var shard struct {
-		Content string `json:"content"`
-	}
-	if err := json.Unmarshal(out, &shard); err != nil {
-		return "", err
-	}
-	return shard.Content, nil
 }
 
 func appendGap(ctx context.Context, gapsShard string, broken BrokenAnchor) error {

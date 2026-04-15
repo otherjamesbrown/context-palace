@@ -416,7 +416,27 @@ These shards track the health and coverage of the KB itself. They are not subjec
 
 **Required meta-KB shards:**
 
-1. **Canary questions** — A set of retrieval test queries with expected facts and source article IDs. Used to verify that search returns the right articles. Re-seed after any renovation or major restructuring. Example format:
+1. **Canary questions** — A set of retrieval test queries with expected facts and source article IDs. Used to verify that search returns the right articles. Re-seed after any renovation or major restructuring.
+
+   Bootstrap with the generic starter pack:
+   ```bash
+   cxp schedule seed-canaries --shard <canary-shard-id>
+   ```
+
+   Add project-specific questions:
+   ```bash
+   cxp schedule canary add \
+     --question "What model does the classify_project stage use?" \
+     --expected "gemini-2.5-flash,classify_project,ai_routing_rules" \
+     --source pf-861f0c
+   ```
+
+   View questions and validation flags:
+   ```bash
+   cxp schedule canary list
+   ```
+
+   Example format stored in the shard:
    ```yaml
    - q: "What model does the classify_project stage use?"
      expected_facts: ["gemini-2.5-flash", "classify_project", "ai_routing_rules"]

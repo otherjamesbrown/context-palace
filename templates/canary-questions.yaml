@@ -1,0 +1,92 @@
+# Canary Question Starter Pack
+#
+# Generic retrieval-quality questions for any KB with:
+#   - A playbook root with 3+ branches
+#   - An architecture or overview branch
+#   - At least one subsystem branch with operational content
+#
+# Usage:
+#   cxp schedule seed-canaries --shard <canary-shard-id>
+#
+# After seeding, replace the placeholder source_kb values with your
+# actual shard IDs, and tune expected_facts to match your KB content.
+#
+# Guidelines for good canary questions:
+#   - 2-4 expected_facts per question (enough to verify the right article was returned)
+#   - Mix keyword questions (exact terms from the article) and natural language questions
+#   - Cover your highest-access articles and most critical subsystems
+#   - Update after any KB renovation or major restructuring
+
+- q: "What are the main knowledge domains or sections in this project's KB?"
+  expected_facts:
+    - playbook
+    - branch
+  source_kb: ""
+
+- q: "How do I build or compile this project locally?"
+  expected_facts:
+    - build
+    - go build
+  source_kb: ""
+
+- q: "Where are the tests located and how do I run them?"
+  expected_facts:
+    - test
+    - go test
+  source_kb: ""
+
+- q: "What database does this project use and how is the connection configured?"
+  expected_facts:
+    - database
+    - config
+  source_kb: ""
+
+- q: "What is the overall architecture of this system and its main components?"
+  expected_facts:
+    - architecture
+    - component
+  source_kb: ""
+
+- q: "What are the core data entities or domain models in this system?"
+  expected_facts:
+    - entity
+    - model
+  source_kb: ""
+
+- q: "How is the project deployed to production?"
+  expected_facts:
+    - deploy
+  source_kb: ""
+
+- q: "What are the main integration points or external service dependencies?"
+  expected_facts:
+    - integration
+  source_kb: ""
+
+- q: "Where does configuration live and how is it structured?"
+  expected_facts:
+    - config
+  source_kb: ""
+
+- q: "How do I troubleshoot or debug common errors in this system?"
+  expected_facts:
+    - troubleshoot
+    - error
+  source_kb: ""
+
+- q: "What is the status lifecycle for work items or tasks?"
+  expected_facts:
+    - status
+    - open
+  source_kb: ""
+
+- q: "How are knowledge articles organized and navigated in this KB?"
+  expected_facts:
+    - knowledge
+    - playbook
+  source_kb: ""
+
+- q: "What conventions or standards does this project follow for code or process?"
+  expected_facts:
+    - convention
+  source_kb: ""
