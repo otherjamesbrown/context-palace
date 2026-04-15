@@ -107,23 +107,42 @@ The drift scan re-verifies all KB articles against the current state of the syst
 ### How it works
 
 1. Lists all open knowledge shards for the project
-2. For each article, re-runs file-path and function-name checks against the current codebase (using `git ls-files` and `git grep`)
-3. Any claim that was valid when the article was written but is now broken → drift detected
-4. Logs each drift to the gaps shard with category `drift-detected`
+2. For each article, extracts claims two ways:
+   - Regex-based pass for file paths and function names (always on)
+   - LLM-based pass via `claim_extraction_model` for all seven claim types (below) — skipped silently if the model is unavailable
+3. Verifies each claim against the relevant source:
+   - `file_path` via `git ls-files`
+   - `function_name`, `type_name` via `git grep`
+   - `db_table`, `db_column` via `information_schema` (requires `db_conn_str`)
+   - `config_key` via a project-supplied query (`config_key_query` + `db_conn_str`; skipped if either is absent)
+   - `shard_id` via `cxp shard show`
+4. Broken claims are appended to the gaps shard with category `drift-detected`.
+5. **Layer 2 semantic judge (rolling):** on every run, the N articles with the oldest `last_semantic_check_at` metadata go through a second pass. The judge LLM (different model family from the extractor) compares the article's current content against its previous version via `cxp knowledge diff` and classifies any drift as `ok`, `drift_interpretation`, `drift_coverage`, or `drift_scope`. Non-`ok` findings are appended to the gaps shard with category `semantic-drift`. Each reviewed article's `last_semantic_check_at` is updated so the rotation moves on.
 
-**Planned (v2):** Rolling Layer 2 semantic judge on a nightly batch of articles — catching slow interpretation drift that anchor checks alone miss. Tracked in cp-165854.
+### What the factchecker verifies
+
+| Type | How it's checked |
+|------|---------------|
+| `file_path` | `git ls-files` |
+| `function_name` | `git grep` for `func|fn|def <name>` |
+| `type_name` | `git grep` for `type <name>` |
+| `db_table` | `information_schema.tables` |
+| `db_column` | `information_schema.columns` |
+| `config_key` | Project-configured SQL query |
+| `shard_id` | `cxp shard show` |
 
 ### What it catches
 
-- File path rot — files moved, renamed, or deleted by changes that bypassed CoBuild
-- Function-name renames — refactors that rename functions referenced in KB articles
+- File path rot — files moved, renamed, or deleted
+- Function-name, type-name, DB table and column renames or deletions
+- Config keys and shard IDs that no longer exist
+- Conceptual staleness caught by the rolling semantic judge — incorrect interpretation, removed coverage, or drifted scope
 
 ### What it doesn't catch
 
 - New subsystems with no article (there's nothing to scan)
-- Environment-specific values (connection strings, hostnames — not in the factcheck table)
-- Direct DB schema changes (table/column additions, renames, drops) — v1 does not query the DB; planned in cp-165854
-- Conceptual staleness where the anchors are fine but the explanation is wrong — the rolling semantic judge that would catch this is planned in cp-165854
+- Environment-specific values (connection strings, hostnames — not in the verification table)
+- Semantic issues in articles that haven't come up in the judge rotation yet
 
 ### Configuration
 
@@ -138,16 +157,12 @@ cxp schedule create drift-scan --cron "0 3 * * *" \
 |-----------|---------|---------|
 | `repo_path` | (required) | Path to the project's git repo for file-based checks |
 | `gaps_shard` | (required) | Shard ID where drift findings are logged |
-
-### Planned v2 config (cp-165854)
-
-When LLM-based claim extraction and the rolling semantic judge ship, the following keys will be added:
-
-| Config key | Default | Purpose |
-|-----------|---------|---------|
-| `factcheck_model` | `gemini/gemini-2.0-flash` | Model for claim extraction |
-| `judge_model` | `claude/claude-haiku-4-5` | Model for semantic review (must differ from factcheck family) |
-| `judge_articles_per_run` | 5 | Articles to semantic-check per nightly run |
+| `claim_extraction_model` | `gemini/gemini-2.0-flash` | Model for LLM claim extraction (falls back to regex-only if unavailable) |
+| `max_claims_per_article` | `50` | Cap on LLM-extracted claims per article |
+| `db_conn_str` | (optional) | libpq connection string used for `db_table`, `db_column`, `config_key` checks |
+| `config_key_query` | (optional) | Base SQL query for `config_key` verification; the value is appended as `= '<value>'` |
+| `judge_model` | `claude/claude-haiku-4-5` | Model for the rolling semantic judge (must differ from claim_extraction_model family) |
+| `judge_articles_per_run` | `5` | Articles to semantic-check per run; set to `-1` to disable Layer 2 |
 
 ## Daily: Canary Testing
 
