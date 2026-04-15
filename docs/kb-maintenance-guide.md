@@ -178,19 +178,35 @@ All three are actionable. The gap entry includes the failing question, the agent
 
 ### Writing canary questions
 
-Canary questions live in a dedicated shard (see meta-KB shards in `kb-authoring-guide.md`). Format:
+Canary questions live in a dedicated shard (see meta-KB shards in `kb-authoring-guide.md`).
 
-```yaml
-- q: "What model does the classify_project stage use?"
-  expected_facts: ["gemini-2.5-flash", "classify_project", "ai_routing_rules"]
-  source_kb: pf-861f0c
+**Seed with defaults first.** A default starter pack ships with Context Palace. After `cxp schedule init`, run:
 
-- q: "Why does classify_project run for all content regardless of triage skip decisions?"
-  expected_facts: ["skip_when_low", "PERSONAL", "project attribution"]
-  source_kb: pf-d7b678
+```bash
+cxp schedule seed-canaries
+# Seeded 12 questions (0 already present, skipped)
 ```
 
-Each question targets a specific article. Good canary questions:
+This populates the canaries shard with 12 generic questions that exercise common KB article shapes. Running it a second time is idempotent — duplicates are skipped.
+
+**Add project-specific questions.** Once your KB has content, add targeted questions that verify specific articles:
+
+```bash
+cxp schedule canary add \
+  --question "What model does the classify_project stage use?" \
+  --expected "gemini-2.5-flash,classify_project" \
+  --source pf-861f0c
+```
+
+**Review the question set:**
+
+```bash
+cxp schedule canary list
+```
+
+Prints each question with validation warnings for missing expected_facts, empty source_kb, or duplicate question text.
+
+**Authoring guidelines.** Good canary questions:
 
 - Cover the most important articles (high access count, critical subsystems)
 - Test both keyword and semantic retrieval (some questions should use the exact terms in the article, others should use natural language)
@@ -283,7 +299,7 @@ If your project already uses CoBuild for pipeline automation:
    cxp schedule init --repo-path /path/to/repo
    ```
    This creates drift scan, canary, and triage schedules with sensible defaults, and creates the gaps/canaries/escalations shards if they don't exist.
-4. **Seed canary questions** — write 20-30 questions covering your most important KB articles.
+4. **Seed canary questions** — run `cxp schedule seed-canaries` to populate the canaries shard with a 12-question starter pack, then add project-specific questions with `cxp schedule canary add`.
 
 ### For projects not using CoBuild
 

@@ -302,6 +302,14 @@ cxp schedule run nightly-drift
 # History
 cxp schedule history nightly-drift
 cxp schedule last nightly-drift
+
+# Canary question authoring
+cxp schedule seed-canaries           # Seed default 12-question starter pack (idempotent)
+cxp schedule canary add \
+  --question "How does X work?" \
+  --expected "fact1,fact2" \
+  --source pf-abc123                 # Append a single project-specific question
+cxp schedule canary list             # List questions with validation warnings
 ```
 
 ### Built-in workflows

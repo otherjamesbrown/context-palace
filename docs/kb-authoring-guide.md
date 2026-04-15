@@ -416,12 +416,7 @@ These shards track the health and coverage of the KB itself. They are not subjec
 
 **Required meta-KB shards:**
 
-1. **Canary questions** — A set of retrieval test queries with expected facts and source article IDs. Used to verify that search returns the right articles. Re-seed after any renovation or major restructuring. Example format:
-   ```yaml
-   - q: "What model does the classify_project stage use?"
-     expected_facts: ["gemini-2.5-flash", "classify_project", "ai_routing_rules"]
-     source_kb: pf-861f0c
-   ```
+1. **Canary questions** — A set of retrieval test queries with expected facts and source article IDs. Used to verify that search returns the right articles. After `cxp schedule init`, run `cxp schedule seed-canaries` to populate this shard with a 12-question starter pack. Add project-specific questions with `cxp schedule canary add --question "..." --expected "fact1,fact2" --source <shard-id>`. Review the full set with `cxp schedule canary list`. Re-seed after any renovation or major restructuring.
 
 2. **Gap tracker** — Append-only log of KB failures. Categories: `hallucination` (factcheck caught a wrong claim), `omission` (judge found missing coverage), `drift-detected` (nightly scan found anchor rot), `retrieval-failure` (canary question returned wrong article), `coverage-hole` (agent couldn't find what it needed).
 

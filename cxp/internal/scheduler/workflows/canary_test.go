@@ -175,6 +175,48 @@ func TestCanaryRunner_Run_NilConfig(t *testing.T) {
 	}
 }
 
+func TestDefaultCanaryQuestions_NonEmpty(t *testing.T) {
+	questions, err := DefaultCanaryQuestions()
+	if err != nil {
+		t.Fatalf("DefaultCanaryQuestions() error: %v", err)
+	}
+	if len(questions) == 0 {
+		t.Error("DefaultCanaryQuestions() returned empty list")
+	}
+	if len(questions) < 10 {
+		t.Errorf("expected at least 10 default questions, got %d", len(questions))
+	}
+}
+
+func TestDefaultCanaryQuestions_AllValid(t *testing.T) {
+	questions, err := DefaultCanaryQuestions()
+	if err != nil {
+		t.Fatalf("DefaultCanaryQuestions() error: %v", err)
+	}
+	for i, q := range questions {
+		if q.Q == "" {
+			t.Errorf("question[%d] has empty Q field", i)
+		}
+		if len(q.ExpectedFacts) == 0 {
+			t.Errorf("question[%d] %q has empty expected_facts", i, q.Q)
+		}
+	}
+}
+
+func TestDefaultCanaryQuestions_Idempotent(t *testing.T) {
+	q1, err := DefaultCanaryQuestions()
+	if err != nil {
+		t.Fatalf("first call error: %v", err)
+	}
+	q2, err := DefaultCanaryQuestions()
+	if err != nil {
+		t.Fatalf("second call error: %v", err)
+	}
+	if len(q1) != len(q2) {
+		t.Errorf("inconsistent results: %d vs %d questions", len(q1), len(q2))
+	}
+}
+
 // mustParseCanaryYAML is a test helper that parses YAML into []CanaryQuestion.
 func mustParseCanaryYAML(t *testing.T, yamlBlock string) []CanaryQuestion {
 	t.Helper()

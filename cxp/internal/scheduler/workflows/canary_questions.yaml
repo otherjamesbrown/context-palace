@@ -1,0 +1,77 @@
+# Generic canary question starter pack.
+# These 12 questions test retrieval quality across common article categories:
+# playbook lookup, subsystem articles, config keys, and operational runbooks.
+# Phrasing is intentionally generic so any project KB with a playbook + 3+ branches
+# can satisfy them. Override source_kb per-question once your KB is populated.
+
+- q: "What is this project and what is it trying to accomplish?"
+  expected_facts:
+    - project
+    - overview
+  source_kb: ""
+
+- q: "How do I get started working in this project?"
+  expected_facts:
+    - start
+    - guide
+  source_kb: ""
+
+- q: "What are the main components or subsystems in this project?"
+  expected_facts:
+    - component
+    - subsystem
+  source_kb: ""
+
+- q: "What is the standard workflow for completing a work item or task?"
+  expected_facts:
+    - workflow
+    - task
+  source_kb: ""
+
+- q: "How do team members or agents communicate and hand off work?"
+  expected_facts:
+    - handoff
+    - agent
+  source_kb: ""
+
+- q: "Where do I find the operational runbook for a known issue or process?"
+  expected_facts:
+    - runbook
+    - step
+  source_kb: ""
+
+- q: "What configuration settings are required to set up this system?"
+  expected_facts:
+    - config
+    - key
+  source_kb: ""
+
+- q: "How is the knowledge base organised and how do I search it?"
+  expected_facts:
+    - knowledge
+    - search
+  source_kb: ""
+
+- q: "What design decisions or architectural choices have been documented?"
+  expected_facts:
+    - design
+    - decision
+  source_kb: ""
+
+- q: "What naming conventions or coding standards are followed in this project?"
+  expected_facts:
+    - convention
+    - standard
+  source_kb: ""
+
+- q: "How do automated or scheduled tasks operate in this project?"
+  expected_facts:
+    - schedule
+    - task
+  source_kb: ""
+
+- q: "What is the escalation process when work is blocked or urgent?"
+  expected_facts:
+    - block
+    - process
+  source_kb: ""

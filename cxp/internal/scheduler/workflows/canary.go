@@ -2,6 +2,7 @@ package workflows
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -11,6 +12,24 @@ import (
 	"github.com/otherjamesbrown/context-palace/cxp/internal/scheduler"
 	"gopkg.in/yaml.v3"
 )
+
+//go:embed canary_questions.yaml
+var defaultCanaryQuestionsYAML []byte
+
+// DefaultCanaryQuestions returns the built-in starter pack of generic canary questions.
+func DefaultCanaryQuestions() ([]CanaryQuestion, error) {
+	var questions []CanaryQuestion
+	if err := yaml.Unmarshal(defaultCanaryQuestionsYAML, &questions); err != nil {
+		return nil, fmt.Errorf("parse default canary questions: %w", err)
+	}
+	var valid []CanaryQuestion
+	for _, q := range questions {
+		if q.Q != "" && len(q.ExpectedFacts) > 0 {
+			valid = append(valid, q)
+		}
+	}
+	return valid, nil
+}
 
 // CanaryRunner executes end-to-end retrieval tests against the knowledge base.
 type CanaryRunner struct{}
@@ -65,6 +84,13 @@ func (r CanaryRunner) Run(ctx context.Context, configRaw json.RawMessage) (strin
 	questions, err := loadCanaryQuestions(ctx, cfg.CanaryShard)
 	if err != nil {
 		return "", nil, fmt.Errorf("load canaries: %w", err)
+	}
+
+	if len(questions) == 0 {
+		summary := "no questions seeded — run `cxp schedule seed-canaries` to populate the canaries shard"
+		result := CanaryResult{}
+		resultJSON, _ := json.Marshal(result)
+		return summary, resultJSON, nil
 	}
 
 	result := CanaryResult{QuestionsTotal: len(questions)}
@@ -132,22 +158,6 @@ func extractYAMLBlock(content string) string {
 		}
 	}
 	return content
-}
-
-// getShardContent retrieves the body of a shard by running cxp shard show.
-func getShardContent(ctx context.Context, shardID string) (string, error) {
-	cmd := exec.CommandContext(ctx, "cxp", "shard", "show", shardID, "--output", "json")
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("cxp shard show %s: %w", shardID, err)
-	}
-	var shard struct {
-		Body string `json:"body"`
-	}
-	if err := json.Unmarshal(out, &shard); err != nil {
-		return string(out), nil
-	}
-	return shard.Body, nil
 }
 
 // runKBSearch invokes cxp kb search and concatenates snippet+title pairs into a blob.
