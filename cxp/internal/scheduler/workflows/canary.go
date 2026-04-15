@@ -67,6 +67,12 @@ func (r CanaryRunner) Run(ctx context.Context, configRaw json.RawMessage) (strin
 		return "", nil, fmt.Errorf("load canaries: %w", err)
 	}
 
+	if len(questions) == 0 {
+		summary := fmt.Sprintf("no questions seeded — run `cxp schedule seed-canaries --shard %s` to populate the canary question set", cfg.CanaryShard)
+		result, _ := json.Marshal(CanaryResult{})
+		return summary, result, nil
+	}
+
 	result := CanaryResult{QuestionsTotal: len(questions)}
 
 	for _, q := range questions {
@@ -134,22 +140,6 @@ func extractYAMLBlock(content string) string {
 	return content
 }
 
-// getShardContent retrieves the body of a shard by running cxp shard show.
-func getShardContent(ctx context.Context, shardID string) (string, error) {
-	cmd := exec.CommandContext(ctx, "cxp", "shard", "show", shardID, "--output", "json")
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("cxp shard show %s: %w", shardID, err)
-	}
-	var shard struct {
-		Body string `json:"body"`
-	}
-	if err := json.Unmarshal(out, &shard); err != nil {
-		return string(out), nil
-	}
-	return shard.Body, nil
-}
-
 // runKBSearch invokes cxp kb search and concatenates snippet+title pairs into a blob.
 func runKBSearch(ctx context.Context, query string, maxResults int) (string, error) {
 	cmd := exec.CommandContext(ctx, "cxp", "kb", "search", query,
@@ -195,6 +185,111 @@ func appendCanaryGap(ctx context.Context, gapsShard string, failure CanaryFailur
 		failure.Question, failure.ExpectedFacts, failure.MissingFacts, failure.SourceKB)
 	cmd := exec.CommandContext(ctx, "cxp", "shard", "append", gapsShard, "--body", line)
 	return cmd.Run()
+}
+
+// LoadCanaryQuestionsFromShard is the exported wrapper for loading and parsing
+// canary questions from a shard, used by the seed and canary subcommands.
+func LoadCanaryQuestionsFromShard(ctx context.Context, shardID string) ([]CanaryQuestion, error) {
+	content, err := getShardContent(ctx, shardID)
+	if err != nil {
+		return nil, err
+	}
+	yamlBlock := extractYAMLBlock(content)
+	var questions []CanaryQuestion
+	if err := yaml.Unmarshal([]byte(yamlBlock), &questions); err != nil {
+		return nil, fmt.Errorf("parse canary YAML: %w", err)
+	}
+	return questions, nil
+}
+
+// MergeCanaryQuestions merges incoming questions into existing ones, deduplicating
+// on question text (case-insensitive). Returns the merged slice with existing questions
+// first, then any new questions from incoming.
+func MergeCanaryQuestions(existing, incoming []CanaryQuestion) []CanaryQuestion {
+	seen := make(map[string]bool, len(existing))
+	for _, q := range existing {
+		seen[strings.ToLower(strings.TrimSpace(q.Q))] = true
+	}
+	merged := make([]CanaryQuestion, len(existing))
+	copy(merged, existing)
+	for _, q := range incoming {
+		key := strings.ToLower(strings.TrimSpace(q.Q))
+		if !seen[key] {
+			seen[key] = true
+			merged = append(merged, q)
+		}
+	}
+	return merged
+}
+
+// DefaultCanaryQuestions returns the built-in generic starter pack of canary questions.
+// These cover common KB article shapes: playbook lookup, architecture, subsystem retrieval,
+// config lookup, and operational runbooks. Customize expected_facts and source_kb for your project.
+func DefaultCanaryQuestions() []CanaryQuestion {
+	return []CanaryQuestion{
+		{
+			Q:             "What are the main knowledge domains or sections in this project's KB?",
+			ExpectedFacts: []string{"playbook", "branch"},
+		},
+		{
+			Q:             "How do I build or compile this project locally?",
+			ExpectedFacts: []string{"build", "go build"},
+		},
+		{
+			Q:             "Where are the tests located and how do I run them?",
+			ExpectedFacts: []string{"test", "go test"},
+		},
+		{
+			Q:             "What database does this project use and how is the connection configured?",
+			ExpectedFacts: []string{"database", "config"},
+		},
+		{
+			Q:             "What is the overall architecture of this system and its main components?",
+			ExpectedFacts: []string{"architecture", "component"},
+		},
+		{
+			Q:             "What are the core data entities or domain models in this system?",
+			ExpectedFacts: []string{"entity", "model"},
+		},
+		{
+			Q:             "How is the project deployed to production?",
+			ExpectedFacts: []string{"deploy"},
+		},
+		{
+			Q:             "What are the main integration points or external service dependencies?",
+			ExpectedFacts: []string{"integration"},
+		},
+		{
+			Q:             "Where does configuration live and how is it structured?",
+			ExpectedFacts: []string{"config"},
+		},
+		{
+			Q:             "How do I troubleshoot or debug common errors in this system?",
+			ExpectedFacts: []string{"troubleshoot", "error"},
+		},
+		{
+			Q:             "What is the status lifecycle for work items or tasks?",
+			ExpectedFacts: []string{"status", "open"},
+		},
+		{
+			Q:             "How are knowledge articles organized and navigated in this KB?",
+			ExpectedFacts: []string{"knowledge", "playbook"},
+		},
+		{
+			Q:             "What conventions or standards does this project follow for code or process?",
+			ExpectedFacts: []string{"convention"},
+		},
+	}
+}
+
+// FormatCanaryQuestionsYAML serialises a slice of questions as a fenced YAML block
+// suitable for embedding in a shard body.
+func FormatCanaryQuestionsYAML(questions []CanaryQuestion) (string, error) {
+	data, err := yaml.Marshal(questions)
+	if err != nil {
+		return "", fmt.Errorf("marshal canary questions: %w", err)
+	}
+	return "```yaml\n" + string(data) + "```\n", nil
 }
 
 func init() {
