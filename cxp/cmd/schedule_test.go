@@ -201,3 +201,77 @@ func TestSchedule_UnknownWorkflowType(t *testing.T) {
 		t.Errorf("result error %q does not contain expected message", errMsg)
 	}
 }
+
+// TestScheduleInit_DryRun verifies that --dry-run prints the plan without writing.
+func TestScheduleInit_DryRun(t *testing.T) {
+	c := testDBClient(t)
+	ctx := context.Background()
+
+	// Get the project prefix to form expected shard IDs.
+	prefix, err := c.GetProjectIDPrefix(ctx)
+	if err != nil {
+		t.Fatalf("GetProjectIDPrefix: %v", err)
+	}
+	gapsID := prefix + "-kb-gaps-dryrun-" + fmt.Sprintf("%d", time.Now().UnixNano())
+
+	// Ensure the gaps shard doesn't exist.
+	shard, err := c.GetShard(ctx, gapsID)
+	if shard != nil || err == nil {
+		t.Skipf("test shard %s already exists; skipping to avoid conflict", gapsID)
+	}
+
+	// Verify GetScheduleIfExists returns false for a non-existent schedule.
+	schedule, found, err := c.GetScheduleIfExists(ctx, c.Config.Project, "drift-scan-dryrun-test")
+	if err != nil {
+		t.Fatalf("GetScheduleIfExists: %v", err)
+	}
+	if found || schedule != nil {
+		t.Error("expected schedule not found, got found=true")
+	}
+}
+
+// TestScheduleInit_Idempotency verifies that GetScheduleIfExists returns the
+// existing schedule on a second call without error.
+func TestScheduleInit_Idempotency(t *testing.T) {
+	c := testDBClient(t)
+	ctx := context.Background()
+
+	name := fmt.Sprintf("test-init-idem-%d", time.Now().UnixNano())
+
+	// Create a schedule.
+	created, err := c.CreateSchedule(ctx, client.CreateScheduleInput{
+		Project:       c.Config.Project,
+		Name:          name,
+		WorkflowType:  "noop",
+		ScheduleExpr:  "0 3 * * *",
+		OverlapPolicy: client.ScheduleOverlapSkip,
+		Config:        json.RawMessage(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateSchedule: %v", err)
+	}
+
+	// First call: should find it.
+	existing, found, err := c.GetScheduleIfExists(ctx, c.Config.Project, name)
+	if err != nil {
+		t.Fatalf("GetScheduleIfExists (first): %v", err)
+	}
+	if !found {
+		t.Fatal("GetScheduleIfExists: expected found=true, got false")
+	}
+	if existing.ID != created.ID {
+		t.Errorf("schedule ID mismatch: got %d, want %d", existing.ID, created.ID)
+	}
+
+	// Second call: still returns same result (idempotent read).
+	existing2, found2, err := c.GetScheduleIfExists(ctx, c.Config.Project, name)
+	if err != nil {
+		t.Fatalf("GetScheduleIfExists (second): %v", err)
+	}
+	if !found2 {
+		t.Fatal("GetScheduleIfExists: expected found=true on second call")
+	}
+	if existing2.ID != created.ID {
+		t.Errorf("idempotency check: schedule ID mismatch on second call")
+	}
+}

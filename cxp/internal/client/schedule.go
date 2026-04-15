@@ -209,6 +209,43 @@ func (c *Client) GetSchedule(ctx context.Context, project, name string) (*Schedu
 	return &schedule, nil
 }
 
+// GetScheduleIfExists fetches a schedule by project and name, returning (nil, false, nil) if not found.
+func (c *Client) GetScheduleIfExists(ctx context.Context, project, name string) (*Schedule, bool, error) {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	defer conn.Close(ctx)
+
+	project = strings.TrimSpace(project)
+	if project == "" {
+		project = c.Config.Project
+	}
+	name = strings.TrimSpace(name)
+	if project == "" {
+		return nil, false, fmt.Errorf("project is required")
+	}
+	if name == "" {
+		return nil, false, fmt.Errorf("schedule name is required")
+	}
+
+	row := conn.QueryRow(ctx, `
+		SELECT id, project, name, workflow_type, schedule_expr, enabled,
+			overlap_policy, config, last_run_at, next_run_at, created_at, updated_at
+		FROM schedules
+		WHERE project = $1 AND name = $2
+	`, project, name)
+
+	schedule, err := scanSchedule(row)
+	if err == pgx.ErrNoRows {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to get schedule %s: %v", name, err)
+	}
+	return &schedule, true, nil
+}
+
 // EnableSchedule enables a schedule and recomputes the next run time from now.
 func (c *Client) EnableSchedule(ctx context.Context, project, name string) (*Schedule, error) {
 	return c.setScheduleEnabled(ctx, project, name, true)

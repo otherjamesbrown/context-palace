@@ -368,6 +368,7 @@ func init() {
 
 	scheduleCmd.AddCommand(scheduleListCmd)
 	scheduleCmd.AddCommand(scheduleCreateCmd)
+	scheduleCmd.AddCommand(scheduleInitCmd)
 	scheduleCmd.AddCommand(scheduleEnableCmd)
 	scheduleCmd.AddCommand(scheduleDisableCmd)
 	scheduleCmd.AddCommand(scheduleRunCmd)
