@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os/exec"
 	"regexp"
+	"strings"
 	"time"
 
+	"github.com/otherjamesbrown/context-palace/cxp/internal/generation"
 	"github.com/otherjamesbrown/context-palace/cxp/internal/scheduler"
 )
 
@@ -16,22 +19,28 @@ type DriftScanRunner struct{}
 func (DriftScanRunner) Name() string { return "drift-scan" }
 
 type DriftScanConfig struct {
-	RepoPath    string `json:"repo_path"`
-	GapsShard   string `json:"gaps_shard"`
-	MaxArticles int    `json:"max_articles,omitempty"`
+	RepoPath             string `json:"repo_path"`
+	GapsShard            string `json:"gaps_shard"`
+	MaxArticles          int    `json:"max_articles,omitempty"`
+	ClaimExtractionModel string `json:"claim_extraction_model,omitempty"` // default: "gemini/gemini-2.0-flash"
+	MaxClaimsPerArticle  int    `json:"max_claims_per_article,omitempty"`  // default: 50
+	ConfigKeyQuery       string `json:"config_key_query,omitempty"`        // SQL base for config_key verification; value appended as = '<value>'
+	DBConnStr            string `json:"db_conn_str,omitempty"`             // libpq conn string for db_table/db_column/config_key
 }
 
 type DriftScanResult struct {
-	ArticlesScanned int            `json:"articles_scanned"`
-	AnchorsChecked  int            `json:"anchors_checked"`
-	AnchorsBroken   int            `json:"anchors_broken"`
-	GapsLogged      int            `json:"gaps_logged"`
-	BrokenAnchors   []BrokenAnchor `json:"broken_anchors,omitempty"`
+	ArticlesScanned        int            `json:"articles_scanned"`
+	AnchorsChecked         int            `json:"anchors_checked"`
+	AnchorsBroken          int            `json:"anchors_broken"`
+	GapsLogged             int            `json:"gaps_logged"`
+	BrokenAnchors          []BrokenAnchor `json:"broken_anchors,omitempty"`
+	ClaimsExtractedByLLM   int            `json:"claims_extracted_by_llm"`
+	ClaimsExtractedByRegex int            `json:"claims_extracted_by_regex"`
 }
 
 type BrokenAnchor struct {
 	ArticleID string `json:"article_id"`
-	Type      string `json:"type"` // "file_path" | "function_name"
+	Type      string `json:"type"`
 	Value     string `json:"value"`
 	Reason    string `json:"reason"`
 }
@@ -49,6 +58,19 @@ func (r DriftScanRunner) Run(ctx context.Context, configRaw json.RawMessage) (st
 	if cfg.GapsShard == "" {
 		return "", nil, fmt.Errorf("drift_scan config requires gaps_shard")
 	}
+	if cfg.MaxClaimsPerArticle == 0 {
+		cfg.MaxClaimsPerArticle = 50
+	}
+	if cfg.ClaimExtractionModel == "" {
+		cfg.ClaimExtractionModel = "gemini/gemini-2.0-flash"
+	}
+
+	var gen generation.Generator
+	if g, err := newGeneratorFromModel(cfg.ClaimExtractionModel); err != nil {
+		log.Printf("drift-scan: LLM extractor unavailable (%v); falling back to regex only", err)
+	} else {
+		gen = g
+	}
 
 	articles, err := listKBArticles(ctx)
 	if err != nil {
@@ -65,11 +87,25 @@ func (r DriftScanRunner) Run(ctx context.Context, configRaw json.RawMessage) (st
 		if err != nil {
 			continue
 		}
-		anchors := extractAnchors(content)
+
+		regexAnchors := extractAnchors(content)
+		result.ClaimsExtractedByRegex += len(regexAnchors)
+
+		var llmAnchors []Anchor
+		if gen != nil {
+			var llmErr error
+			llmAnchors, llmErr = extractClaimsLLM(ctx, content, gen, cfg.MaxClaimsPerArticle)
+			if llmErr != nil {
+				log.Printf("drift-scan: LLM extraction failed for article %s: %v; continuing with regex", articleID, llmErr)
+			}
+		}
+		result.ClaimsExtractedByLLM += len(llmAnchors)
+
+		anchors := mergeAndDedup(regexAnchors, llmAnchors)
 		result.AnchorsChecked += len(anchors)
 
 		for _, anchor := range anchors {
-			ok, reason := verifyAnchor(cfg.RepoPath, anchor)
+			ok, reason := verifyAnchor(ctx, cfg, anchor)
 			if !ok {
 				result.AnchorsBroken++
 				broken := BrokenAnchor{
@@ -86,8 +122,9 @@ func (r DriftScanRunner) Run(ctx context.Context, configRaw json.RawMessage) (st
 		}
 	}
 
-	summary := fmt.Sprintf("scanned %d articles, %d anchors broken, %d gaps logged",
-		result.ArticlesScanned, result.AnchorsBroken, result.GapsLogged)
+	summary := fmt.Sprintf("scanned %d articles, %d anchors broken, %d gaps logged (llm=%d regex=%d)",
+		result.ArticlesScanned, result.AnchorsBroken, result.GapsLogged,
+		result.ClaimsExtractedByLLM, result.ClaimsExtractedByRegex)
 
 	resultJSON, err := json.Marshal(result)
 	if err != nil {
@@ -96,9 +133,9 @@ func (r DriftScanRunner) Run(ctx context.Context, configRaw json.RawMessage) (st
 	return summary, resultJSON, nil
 }
 
-// Anchor types for extraction.
+// Anchor represents a verifiable claim extracted from article content.
 type Anchor struct {
-	Type  string // "file_path" | "function_name"
+	Type  string // "file_path" | "function_name" | "type_name" | "db_table" | "db_column" | "config_key" | "shard_id"
 	Value string
 }
 
@@ -107,6 +144,8 @@ var (
 	funcNameRE = regexp.MustCompile("`([A-Z][a-zA-Z0-9_]+)\\(\\)`")
 )
 
+// extractAnchors extracts file_path and function_name anchors via regex.
+// LLM-based extraction for all 7 claim types is done separately.
 func extractAnchors(content string) []Anchor {
 	seen := map[string]bool{}
 	var anchors []Anchor
@@ -128,23 +167,92 @@ func extractAnchors(content string) []Anchor {
 	return anchors
 }
 
-func verifyAnchor(repoPath string, anchor Anchor) (bool, string) {
+// verifyAnchor checks whether an anchor claim holds against the repo/DB/service.
+// Returns (true, "") if valid or unverifiable (skip), (false, reason) if broken.
+func verifyAnchor(ctx context.Context, cfg DriftScanConfig, anchor Anchor) (bool, string) {
 	switch anchor.Type {
 	case "file_path":
-		cmd := exec.Command("git", "-C", repoPath, "ls-files", "--error-unmatch", anchor.Value)
+		cmd := exec.CommandContext(ctx, "git", "-C", cfg.RepoPath, "ls-files", "--error-unmatch", anchor.Value)
 		if err := cmd.Run(); err != nil {
 			return false, "file not tracked in repo"
 		}
 		return true, ""
+
 	case "function_name":
-		cmd := exec.Command("git", "-C", repoPath, "grep", "-q", "-E",
+		cmd := exec.CommandContext(ctx, "git", "-C", cfg.RepoPath, "grep", "-q", "-E",
 			fmt.Sprintf("(func|fn|def)[[:space:]]+%s", regexp.QuoteMeta(anchor.Value)))
 		if err := cmd.Run(); err != nil {
 			return false, "function name not found in repo"
 		}
 		return true, ""
+
+	case "type_name":
+		cmd := exec.CommandContext(ctx, "git", "-C", cfg.RepoPath, "grep", "-q", "-E",
+			fmt.Sprintf("type[[:space:]]+%s[[:space:]]+", regexp.QuoteMeta(anchor.Value)))
+		if err := cmd.Run(); err != nil {
+			return false, "type name not found in repo"
+		}
+		return true, ""
+
+	case "db_table":
+		if cfg.DBConnStr == "" {
+			return true, "" // skip — not verifiable without DB connection
+		}
+		query := fmt.Sprintf(
+			"SELECT 1 FROM information_schema.tables WHERE table_name = '%s' LIMIT 1",
+			escapeSQLLiteral(anchor.Value),
+		)
+		return runPsqlCheck(ctx, cfg.DBConnStr, query,
+			fmt.Sprintf("table %q not found in database", anchor.Value))
+
+	case "db_column":
+		if cfg.DBConnStr == "" {
+			return true, ""
+		}
+		query := fmt.Sprintf(
+			"SELECT 1 FROM information_schema.columns WHERE column_name = '%s' LIMIT 1",
+			escapeSQLLiteral(anchor.Value),
+		)
+		return runPsqlCheck(ctx, cfg.DBConnStr, query,
+			fmt.Sprintf("column %q not found in database", anchor.Value))
+
+	case "config_key":
+		if cfg.ConfigKeyQuery == "" {
+			return true, "" // skip — not verifiable without a query
+		}
+		if cfg.DBConnStr == "" {
+			return true, ""
+		}
+		query := cfg.ConfigKeyQuery + " = '" + escapeSQLLiteral(anchor.Value) + "'"
+		return runPsqlCheck(ctx, cfg.DBConnStr, query,
+			fmt.Sprintf("config key %q not found", anchor.Value))
+
+	case "shard_id":
+		cmd := exec.CommandContext(ctx, "cxp", "shard", "show", anchor.Value)
+		if err := cmd.Run(); err != nil {
+			return false, fmt.Sprintf("shard %q not found", anchor.Value)
+		}
+		return true, ""
 	}
 	return true, ""
+}
+
+// runPsqlCheck runs a SELECT query via psql and returns true if at least one row is returned.
+func runPsqlCheck(ctx context.Context, connStr, query, failReason string) (bool, string) {
+	cmd := exec.CommandContext(ctx, "psql", connStr, "--no-psqlrc", "-t", "-A", "-c", query)
+	out, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Sprintf("db query error: %v", err)
+	}
+	if strings.TrimSpace(string(out)) == "" {
+		return false, failReason
+	}
+	return true, ""
+}
+
+// escapeSQLLiteral escapes a value for safe embedding in a SQL string literal.
+func escapeSQLLiteral(s string) string {
+	return strings.ReplaceAll(s, "'", "''")
 }
 
 func listKBArticles(ctx context.Context) ([]string, error) {
