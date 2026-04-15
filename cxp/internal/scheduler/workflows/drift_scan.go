@@ -26,6 +26,10 @@ type DriftScanConfig struct {
 	MaxClaimsPerArticle  int    `json:"max_claims_per_article,omitempty"`  // default: 50
 	ConfigKeyQuery       string `json:"config_key_query,omitempty"`        // SQL base for config_key verification; value appended as = '<value>'
 	DBConnStr            string `json:"db_conn_str,omitempty"`             // libpq conn string for db_table/db_column/config_key
+
+	// Layer 2 semantic judge (rolling check of N articles per run)
+	JudgeModel          string `json:"judge_model,omitempty"`           // default: "claude/claude-haiku-4-5"
+	JudgeArticlesPerRun int    `json:"judge_articles_per_run,omitempty"` // default: 5; set to -1 to disable
 }
 
 type DriftScanResult struct {
@@ -36,6 +40,18 @@ type DriftScanResult struct {
 	BrokenAnchors          []BrokenAnchor `json:"broken_anchors,omitempty"`
 	ClaimsExtractedByLLM   int            `json:"claims_extracted_by_llm"`
 	ClaimsExtractedByRegex int            `json:"claims_extracted_by_regex"`
+
+	SemanticChecksRun int              `json:"semantic_checks_run"`
+	SemanticFindings  []SemanticFinding `json:"semantic_findings,omitempty"`
+}
+
+// SemanticFinding records a Layer 2 judge result for an article.
+// Category is one of: "drift_interpretation", "drift_coverage", "drift_scope".
+// OK results are not recorded in this list.
+type SemanticFinding struct {
+	ArticleID string `json:"article_id"`
+	Category  string `json:"category"`
+	Detail    string `json:"detail"`
 }
 
 type BrokenAnchor struct {
@@ -63,6 +79,15 @@ func (r DriftScanRunner) Run(ctx context.Context, configRaw json.RawMessage) (st
 	}
 	if cfg.ClaimExtractionModel == "" {
 		cfg.ClaimExtractionModel = "gemini/gemini-2.0-flash"
+	}
+	if cfg.JudgeModel == "" {
+		cfg.JudgeModel = "claude/claude-haiku-4-5"
+	}
+	if cfg.JudgeArticlesPerRun == 0 {
+		cfg.JudgeArticlesPerRun = 5
+	}
+	if err := generation.ValidateDifferentFamilies(cfg.ClaimExtractionModel, cfg.JudgeModel); err != nil {
+		return "", nil, fmt.Errorf("drift_scan config: %w", err)
 	}
 
 	var gen generation.Generator
@@ -122,9 +147,14 @@ func (r DriftScanRunner) Run(ctx context.Context, configRaw json.RawMessage) (st
 		}
 	}
 
-	summary := fmt.Sprintf("scanned %d articles, %d anchors broken, %d gaps logged (llm=%d regex=%d)",
+	if cfg.JudgeArticlesPerRun > 0 {
+		runSemanticJudge(ctx, cfg, articles, &result)
+	}
+
+	summary := fmt.Sprintf("scanned %d articles, %d anchors broken, %d gaps logged (llm=%d regex=%d); %d semantic checks, %d findings",
 		result.ArticlesScanned, result.AnchorsBroken, result.GapsLogged,
-		result.ClaimsExtractedByLLM, result.ClaimsExtractedByRegex)
+		result.ClaimsExtractedByLLM, result.ClaimsExtractedByRegex,
+		result.SemanticChecksRun, len(result.SemanticFindings))
 
 	resultJSON, err := json.Marshal(result)
 	if err != nil {

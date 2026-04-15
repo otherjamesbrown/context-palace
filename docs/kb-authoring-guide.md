@@ -141,26 +141,23 @@ Anchors are the machine-verifiable references in a KB article: file paths, funct
 
 ### What the factchecker verifies
 
-The automated Layer 1 (`kb-factcheck`) extracts and checks anchors in two phases — v1 (shipped) and v2 (planned).
+The drift-scan workflow extracts anchors two ways (regex + LLM) and verifies each claim against the right source. Seven claim types are supported:
 
-**Verified today (v1):**
-
-| Type | What it checks |
+| Type | How it's checked |
 |------|---------------|
-| File paths | `git ls-files` — does the file exist? |
-| Function names | `git grep "func <name>("` — does the function exist? |
+| `file_path` | `git ls-files` |
+| `function_name` | `git grep` for `func|fn|def <name>` |
+| `type_name` | `git grep` for `type <name>` |
+| `db_table` | `information_schema.tables` (requires `db_conn_str` in the schedule config) |
+| `db_column` | `information_schema.columns` (requires `db_conn_str`) |
+| `config_key` | Project-supplied SQL query (`config_key_query` + `db_conn_str`; silently skipped if either is absent) |
+| `shard_id` | `cxp shard show` |
 
-**Verified when v2 ships (cp-165854):**
+The claim extractor uses `claim_extraction_model` (default `gemini/gemini-2.0-flash`). If that model is unavailable at run time, extraction falls back to the regex pass for `file_path` and `function_name` only — broken anchors for those types are still caught.
 
-| Type | What it checks |
-|------|---------------|
-| Type names | `grep "type <name> "` — does the type exist? |
-| DB tables | `information_schema.tables` — does the table exist? |
-| DB columns | `information_schema.columns` — does the column exist? |
-| Config keys | DB lookup — does the config key exist? |
-| Shard IDs | `cxp shard show` — does the shard exist? |
+A rolling Layer 2 semantic judge also runs against `judge_articles_per_run` articles per scan (default 5, oldest `last_semantic_check_at` first), using a different model family (default `claude/claude-haiku-4-5`). The judge catches interpretation drift, removed coverage, and scope drift that anchor checks miss. Findings are written to the gaps shard with category `semantic-drift`.
 
-Write anchors that target the full claim set above — articles with DB table names, type names, and config keys will be fully verified once v2 lands, and the anchors age well in the meantime. If a file path or function gets renamed today, the v1 factchecker catches it and the drift scan flags it.
+Write anchors for the full claim set — DB table and column names, type names, and config keys are all factcheck-verified today, so anchor-rich articles age well automatically.
 
 ### What the factchecker does NOT verify
 

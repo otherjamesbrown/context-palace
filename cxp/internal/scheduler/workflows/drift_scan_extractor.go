@@ -54,8 +54,11 @@ func newGeneratorFromModel(modelStr string) (generation.Generator, error) {
 	case "gemini", "google":
 		genProvider = "google"
 		apiKeyEnv = "GEMINI_API_KEY"
+	case "claude", "anthropic":
+		genProvider = "anthropic"
+		apiKeyEnv = "ANTHROPIC_API_KEY"
 	default:
-		return nil, fmt.Errorf("unsupported claim extraction provider %q", provider)
+		return nil, fmt.Errorf("unsupported model provider %q", provider)
 	}
 	return generation.NewGenerator(&generation.GenerationConfig{
 		Provider:  genProvider,
