@@ -278,7 +278,11 @@ If your project already uses CoBuild for pipeline automation:
    cxp schedule init --repo-path /path/to/repo
    ```
    This creates drift scan, canary, and triage schedules with sensible defaults, and creates the gaps/canaries/escalations shards if they don't exist.
-4. **Seed canary questions** — write 20-30 questions covering your most important KB articles.
+4. **Start the daemon** — schedules only fire automatically when the daemon is running:
+   ```bash
+   cxp daemon start    # foreground; install the service template for persistence
+   ```
+5. **Seed canary questions** — write 20-30 questions covering your most important KB articles.
 
 ### For projects not using CoBuild
 
@@ -288,7 +292,19 @@ The scheduled workflows (drift scan, canary, triage) operate independently of Co
 - Daily retrieval quality testing
 - Weekly gap triage and escalation
 
-Subscribe via `cxp schedule init` once the CP scheduler is available.
+Subscribe via `cxp schedule init` once available. Then start the daemon so schedules fire automatically:
+
+```bash
+cxp daemon start          # foreground — run inside tmux or as a service
+cxp daemon status         # check running state and PID
+```
+
+See `docs/scheduler/` for launchd (macOS) and systemd (Linux) service templates.
+
+**Without the daemon**, schedules can still be triggered manually:
+```bash
+cxp schedule run drift-scan
+```
 
 ### Minimum viable maintenance
 
@@ -298,7 +314,7 @@ If you want to start with the smallest useful setup:
 2. Create a gaps shard — so failures are tracked, not lost
 3. Manually run a drift scan periodically — `cxp schedule run drift-scan` works without the daemon
 
-Add canary testing and automated triage when your KB has enough articles (10+) to justify the infrastructure.
+Add canary testing and automated triage when your KB has enough articles (10+) to justify the infrastructure. Once schedules are in place, start `cxp daemon start` (or install the service template) so they fire automatically.
 
 ## What the Maintenance System Does NOT Do
 

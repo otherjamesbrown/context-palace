@@ -296,13 +296,38 @@ cxp schedule list
 cxp schedule enable nightly-drift
 cxp schedule disable nightly-drift
 
-# Run in foreground (manual trigger; useful for testing)
+# Run in foreground (manual trigger; works without the daemon)
 cxp schedule run nightly-drift
 
 # History
 cxp schedule history nightly-drift
 cxp schedule last nightly-drift
 ```
+
+### Daemon
+
+To fire schedules automatically on their cron expressions, run the daemon:
+
+```bash
+# Start in the foreground (run inside tmux or as a service)
+cxp daemon start
+
+# Check state and PID
+cxp daemon status
+```
+
+The daemon loads all enabled schedules on startup and picks up create/enable/disable
+changes within seconds via PostgreSQL LISTEN/NOTIFY — no restart required.
+
+**Without the daemon**, schedules exist in the database but only fire when triggered
+manually with `cxp schedule run <name>`. Both modes record runs in `schedule_runs`.
+
+Service templates for running the daemon as a background service:
+
+| Platform | Template |
+|----------|----------|
+| macOS (launchd) | `docs/scheduler/cxp-daemon.plist` |
+| Linux (systemd) | `docs/scheduler/cxp-daemon.service` |
 
 ### Built-in workflows
 
