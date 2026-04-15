@@ -364,8 +364,9 @@ Once you've written 3-4 subsystem articles, you'll have a clear picture of the c
 Once the initial tree is populated:
 
 1. Configure `kb-sync` in your CoBuild pipeline (if using CoBuild)
-2. Seed canary questions for the most important articles
-3. Enable the nightly drift scan
+2. Subscribe to the three scheduled workflows: `cxp schedule init --repo-path /path/to/repo` (creates the gaps/canaries/escalations shards if missing and registers drift-scan, canary, and triage)
+3. Seed canary questions: `cxp schedule seed-canaries` for a generic starter pack, then add project-specific questions with `cxp schedule canary add`
+4. Start the daemon so schedules fire automatically: `cxp daemon start` (see `docs/scheduler/` for launchd/systemd templates)
 
 The maintenance system keeps the KB accurate after bootstrap. But it can only maintain articles that exist — it doesn't create new ones. Gap logging (`/kb-gaps`) and weekly triage handle the discovery of missing articles over time.
 

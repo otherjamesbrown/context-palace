@@ -305,11 +305,19 @@ If your project already uses CoBuild for pipeline automation:
 
 1. **Enable kb-sync** — add `kb_sync: { enabled: true }` to `.cobuild/pipeline.yaml`. This gives you merge-time verification immediately.
 2. **Create the gaps shard** — `cxp shard create --type knowledge --title "KB Gaps Tracker" --body "# KB Gaps"`. Without this, verification failures are logged to stdout only.
-3. **Subscribe to scheduled maintenance** — when available via CP scheduler:
+3. **Subscribe to scheduled maintenance** — one command registers all three workflows and creates any missing singleton shards:
    ```bash
    cxp schedule init --repo-path /path/to/repo
    ```
-   This creates drift scan, canary, and triage schedules with sensible defaults, and creates the gaps/canaries/escalations shards if they don't exist.
+   Expected output:
+   ```
+   Created shards: <prefix>-kb-gaps, <prefix>-kb-canaries, <prefix>-kb-escalations
+   Registered schedules:
+     drift-scan  cron "0 3 * * *"   → <prefix>-kb-gaps
+     canary      cron "0 6 * * *"   → <prefix>-kb-canaries
+     triage      cron "0 5 * * MON" → <prefix>-kb-gaps, <prefix>-kb-escalations
+   ```
+   Running `cxp schedule init` again is a no-op — existing shards and schedules are detected and reused, not duplicated. Use `--dry-run` to preview the plan without writing.
 4. **Start the daemon** — schedules only fire automatically when the daemon is running:
    ```bash
    cxp daemon start    # foreground; install the service template for persistence
@@ -324,7 +332,7 @@ The scheduled workflows (drift scan, canary, triage) operate independently of Co
 - Daily retrieval quality testing
 - Weekly gap triage and escalation
 
-Subscribe via `cxp schedule init` once available. Then start the daemon so schedules fire automatically:
+Subscribe via `cxp schedule init --repo-path /path/to/repo`. Then start the daemon so schedules fire automatically:
 
 ```bash
 cxp daemon start          # foreground — run inside tmux or as a service
