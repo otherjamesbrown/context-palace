@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd plist template for the Context Palace schedule daemon.
+
+  Installation (macOS):
+    1. Copy this file to ~/Library/LaunchAgents/chat.brown.cxp-daemon.plist
+    2. Edit the two UserName and ProgramArguments paths below.
+    3. Load it:
+         launchctl load ~/Library/LaunchAgents/chat.brown.cxp-daemon.plist
+
+  Status:
+    launchctl list chat.brown.cxp-daemon
+
+  Stop:
+    launchctl unload ~/Library/LaunchAgents/chat.brown.cxp-daemon.plist
+-->
+<plist version="1.0">
+<dict>
+    <!-- Unique identifier — change if running multiple CP installs -->
+    <key>Label</key>
+    <string>chat.brown.cxp-daemon</string>
+
+    <!-- Full path to the cxp binary -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/YOUR_USERNAME/bin/cxp</string>
+        <string>daemon</string>
+        <string>start</string>
+    </array>
+
+    <!-- Restart automatically if it exits -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Throttle rapid restarts -->
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <!-- Log destinations — launchd creates these files if absent -->
+    <key>StandardOutPath</key>
+    <string>/tmp/cxp-daemon.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/cxp-daemon.err.log</string>
+
+    <!-- Run as the current user (launchd user agent, not system daemon) -->
+    <!-- Remove this key to run as root (system LaunchDaemons only) -->
+    <key>UserName</key>
+    <string>YOUR_USERNAME</string>
+
+    <!-- Optional: set environment variables if not in ~/.cxp/config.yaml -->
+    <!-- <key>EnvironmentVariables</key>
+    <dict>
+        <key>CXP_USER</key>
+        <string>james</string>
+        <key>CXP_AGENT</key>
+        <string>agent-steve</string>
+    </dict> -->
+</dict>
+</plist>

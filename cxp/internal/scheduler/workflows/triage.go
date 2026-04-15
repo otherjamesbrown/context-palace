@@ -47,7 +47,7 @@ func (r TriageRunner) Run(ctx context.Context, configRaw json.RawMessage) (strin
 	}
 
 	// 1. Read gap entries
-	content, err := getShardContent(ctx, cfg.GapsShard)
+	content, err := triageShardContent(ctx, cfg.GapsShard)
 	if err != nil {
 		return "", nil, fmt.Errorf("read gaps: %w", err)
 	}
@@ -194,7 +194,7 @@ func actionHintForCategory(category string) string {
 	}
 }
 
-func getShardContent(ctx context.Context, shardID string) (string, error) {
+func triageShardContent(ctx context.Context, shardID string) (string, error) {
 	cmd := exec.CommandContext(ctx, "cxp", "shard", "show", shardID, "--output", "json")
 	out, err := cmd.Output()
 	if err != nil {

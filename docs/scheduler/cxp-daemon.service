@@ -1,0 +1,47 @@
+# systemd unit template for the Context Palace schedule daemon.
+#
+# Installation (Linux):
+#   1. Copy this file to ~/.config/systemd/user/cxp-daemon.service
+#      (user service — no root needed)
+#   2. Edit the ExecStart path and any Environment values below.
+#   3. Enable and start:
+#        systemctl --user daemon-reload
+#        systemctl --user enable --now cxp-daemon
+#
+# Status:
+#   systemctl --user status cxp-daemon
+#   journalctl --user -u cxp-daemon -f
+#
+# Stop:
+#   systemctl --user stop cxp-daemon
+#   systemctl --user disable cxp-daemon
+
+[Unit]
+Description=Context Palace Schedule Daemon
+# Restart after network is up (database is remote)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# Full path to the cxp binary
+ExecStart=%h/bin/cxp daemon start
+
+# Restart policy — back off on repeated failures
+Restart=on-failure
+RestartSec=30s
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Optional: set env vars if not configured in ~/.cxp/config.yaml
+# Environment="CXP_USER=james"
+# Environment="CXP_AGENT=agent-steve"
+
+# Logging goes to the journal by default; no extra config needed.
+# To redirect to files, uncomment:
+# StandardOutput=append:/var/log/cxp-daemon.log
+# StandardError=append:/var/log/cxp-daemon.log
+
+[Install]
+WantedBy=default.target

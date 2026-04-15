@@ -61,7 +61,7 @@ func (r DriftScanRunner) Run(ctx context.Context, configRaw json.RawMessage) (st
 	result := DriftScanResult{ArticlesScanned: len(articles)}
 
 	for _, articleID := range articles {
-		content, err := getShardContent(ctx, articleID)
+		content, err := driftShardContent(ctx, articleID)
 		if err != nil {
 			continue
 		}
@@ -166,7 +166,7 @@ func listKBArticles(ctx context.Context) ([]string, error) {
 	return ids, nil
 }
 
-func getShardContent(ctx context.Context, id string) (string, error) {
+func driftShardContent(ctx context.Context, id string) (string, error) {
 	cmd := exec.CommandContext(ctx, "cxp", "shard", "show", id, "--output", "json")
 	out, err := cmd.Output()
 	if err != nil {
