@@ -107,26 +107,23 @@ The drift scan re-verifies all KB articles against the current state of the syst
 ### How it works
 
 1. Lists all open knowledge shards for the project
-2. For each article, re-runs Layer 1 (factcheck) against the current codebase and database
+2. For each article, re-runs file-path and function-name checks against the current codebase (using `git ls-files` and `git grep`)
 3. Any claim that was valid when the article was written but is now broken → drift detected
 4. Logs each drift to the gaps shard with category `drift-detected`
 
-Additionally, on a rolling basis, it runs Layer 2 (semantic judge) on a small batch of articles per night (default: 5). This compares the article's current content against its previous version — catching slow interpretation drift that anchor checks alone miss.
+**Planned (v2):** Rolling Layer 2 semantic judge on a nightly batch of articles — catching slow interpretation drift that anchor checks alone miss. Tracked in cp-165854.
 
 ### What it catches
 
-- Out-of-band code changes that didn't go through CoBuild
-- Direct DB edits (table/column changes)
-- Config tweaks via psql
-- Force-pushes to main that bypass the pipeline
-- Silent renames during refactors
-- Infrastructure changes that break file path references
+- File path rot — files moved, renamed, or deleted by changes that bypassed CoBuild
+- Function-name renames — refactors that rename functions referenced in KB articles
 
 ### What it doesn't catch
 
 - New subsystems with no article (there's nothing to scan)
 - Environment-specific values (connection strings, hostnames — not in the factcheck table)
-- Conceptual staleness where the anchors are fine but the explanation is wrong (partially caught by the rolling semantic check, but only for articles that come up in the rotation)
+- Direct DB schema changes (table/column additions, renames, drops) — v1 does not query the DB; planned in cp-165854
+- Conceptual staleness where the anchors are fine but the explanation is wrong — the rolling semantic judge that would catch this is planned in cp-165854
 
 ### Configuration
 
@@ -134,12 +131,20 @@ Drift scan is configured per-project when subscribing to KB maintenance:
 
 ```bash
 cxp schedule create drift-scan --cron "0 3 * * *" \
-  --config '{"repo_path": "/path/to/repo", "judge_articles_per_run": 5}'
+  --config '{"repo_path": "/path/to/repo", "gaps_shard": "pf-kb-gaps"}'
 ```
 
 | Config key | Default | Purpose |
 |-----------|---------|---------|
 | `repo_path` | (required) | Path to the project's git repo for file-based checks |
+| `gaps_shard` | (required) | Shard ID where drift findings are logged |
+
+### Planned v2 config (cp-165854)
+
+When LLM-based claim extraction and the rolling semantic judge ship, the following keys will be added:
+
+| Config key | Default | Purpose |
+|-----------|---------|---------|
 | `factcheck_model` | `gemini/gemini-2.0-flash` | Model for claim extraction |
 | `judge_model` | `claude/claude-haiku-4-5` | Model for semantic review (must differ from factcheck family) |
 | `judge_articles_per_run` | 5 | Articles to semantic-check per nightly run |

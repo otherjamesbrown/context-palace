@@ -141,19 +141,26 @@ Anchors are the machine-verifiable references in a KB article: file paths, funct
 
 ### What the factchecker verifies
 
-The automated Layer 1 (`kb-factcheck`) extracts and checks these claim types:
+The automated Layer 1 (`kb-factcheck`) extracts and checks anchors in two phases — v1 (shipped) and v2 (planned).
+
+**Verified today (v1):**
 
 | Type | What it checks |
 |------|---------------|
 | File paths | `git ls-files` — does the file exist? |
-| Function names | `grep "func <name>("` — does the function exist? |
+| Function names | `git grep "func <name>("` — does the function exist? |
+
+**Verified when v2 ships (cp-165854):**
+
+| Type | What it checks |
+|------|---------------|
 | Type names | `grep "type <name> "` — does the type exist? |
 | DB tables | `information_schema.tables` — does the table exist? |
 | DB columns | `information_schema.columns` — does the column exist? |
 | Config keys | DB lookup — does the config key exist? |
 | Shard IDs | `cxp shard show` — does the shard exist? |
 
-Write anchors that survive refactors. If a function gets renamed, the factchecker catches it and the drift scan flags it.
+Write anchors that target the full claim set above — articles with DB table names, type names, and config keys will be fully verified once v2 lands, and the anchors age well in the meantime. If a file path or function gets renamed today, the v1 factchecker catches it and the drift scan flags it.
 
 ### What the factchecker does NOT verify
 
