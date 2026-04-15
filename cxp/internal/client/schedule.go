@@ -406,6 +406,63 @@ func (c *Client) UpdateScheduleRun(ctx context.Context, runID int, input UpdateS
 	return &run, nil
 }
 
+// ListAllEnabledSchedules returns all enabled schedules across every project,
+// ordered by project and name.  Used by the daemon to load the full cron table.
+func (c *Client) ListAllEnabledSchedules(ctx context.Context) ([]Schedule, error) {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close(ctx)
+
+	rows, err := conn.Query(ctx, `
+		SELECT id, project, name, workflow_type, schedule_expr, enabled,
+			overlap_policy, config, last_run_at, next_run_at, created_at, updated_at
+		FROM schedules
+		WHERE enabled = true
+		ORDER BY project, name
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list enabled schedules: %v", err)
+	}
+	defer rows.Close()
+
+	var schedules []Schedule
+	for rows.Next() {
+		s, err := scanSchedule(rows)
+		if err != nil {
+			return nil, err
+		}
+		schedules = append(schedules, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("enabled schedule iteration error: %v", err)
+	}
+	return schedules, nil
+}
+
+// CancelRunningScheduleRuns marks all schedule_runs in status='running' for the given
+// schedule as status='cancelled'.  Used by the daemon's cancel_running overlap policy.
+func (c *Client) CancelRunningScheduleRuns(ctx context.Context, scheduleID int) error {
+	conn, err := c.Connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close(ctx)
+
+	_, err = conn.Exec(ctx, `
+		UPDATE schedule_runs
+		SET status      = 'cancelled',
+		    finished_at = NOW()
+		WHERE schedule_id = $1
+		  AND status      = 'running'
+	`, scheduleID)
+	if err != nil {
+		return fmt.Errorf("failed to cancel running schedule runs for schedule %d: %v", scheduleID, err)
+	}
+	return nil
+}
+
 // HasRunningScheduleRun reports whether a schedule currently has a running execution.
 func (c *Client) HasRunningScheduleRun(ctx context.Context, scheduleID int) (bool, error) {
 	conn, err := c.Connect(ctx)

@@ -134,22 +134,6 @@ func extractYAMLBlock(content string) string {
 	return content
 }
 
-// getShardContent retrieves the body of a shard by running cxp shard show.
-func getShardContent(ctx context.Context, shardID string) (string, error) {
-	cmd := exec.CommandContext(ctx, "cxp", "shard", "show", shardID, "--output", "json")
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("cxp shard show %s: %w", shardID, err)
-	}
-	var shard struct {
-		Body string `json:"body"`
-	}
-	if err := json.Unmarshal(out, &shard); err != nil {
-		return string(out), nil
-	}
-	return shard.Body, nil
-}
-
 // runKBSearch invokes cxp kb search and concatenates snippet+title pairs into a blob.
 func runKBSearch(ctx context.Context, query string, maxResults int) (string, error) {
 	cmd := exec.CommandContext(ctx, "cxp", "kb", "search", query,
